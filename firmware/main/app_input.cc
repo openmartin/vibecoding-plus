@@ -140,6 +140,17 @@ void LanMicApp::ToggleSelectedTodo() {
         ? "已完成计划 " + std::to_string(item_index)
         : "已恢复计划 " + std::to_string(item_index);
 
+    // 排序：已完成条目移动到所有未完成条目后面（稳定排序保持相对顺序）
+    std::stable_partition(todo_items_.begin(), todo_items_.end(),
+        [](const TodoItem& t) { return !t.completed; });
+    // 更新选中索引，跟随被切换的条目
+    for (int i = 0; i < static_cast<int>(todo_items_.size()); ++i) {
+        if (todo_items_[i].id == item.id) {
+            todo_selected_index_ = i;
+            break;
+        }
+    }
+
     if (IsServerConnected()) {
         SendTodoCommand("toggle", item_index, next_completed ? 1 : 0, item.id.c_str());
     } else {
@@ -1170,16 +1181,6 @@ void LanMicApp::Run() {
                 status_text_ = "连接中";
                 phase_ = Phase::Idle;
                 UpdateDisplay();
-            } else {
-                ESP_LOGI(kLanMicTag, "PTT start");
-                SendPttStart();
-                phase_ = Phase::Recording;
-                status_text_ = "录音中";
-                hint_text_ = "松开 BOOT 发送";
-                CapturePrerollFrame();
-                FlushPrerollFrames();
-                StreamAudioFrame();
-                UpdateDisplay();
             }
             last_pressed = true;
         }
@@ -1193,7 +1194,7 @@ void LanMicApp::Run() {
             IsServerConnected() &&
             (now_ms - boot_pressed_since_ms) >= kTodoBootHoldMs) {
             todo_hold_started = true;
-            ESP_LOGI(kLanMicTag, "PTT start from page hold");
+            ESP_LOGI(kLanMicTag, "PTT start (long press)");
             SendPttStart();
             phase_ = Phase::Recording;
             status_text_ = "录音中";

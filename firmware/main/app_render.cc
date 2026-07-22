@@ -246,7 +246,7 @@ void LanMicApp::DrawStatusBar(std::vector<Display::TextItem>& texts, const tm* t
     int bat_w = static_cast<int>(battery_text.size()) * 8;
     texts.push_back({battery_text, 368 - bat_w, kTextY, 16});
 
-    // StatusBar 底部 1px 分隔线
+    // StatusBar 底部分隔线（1px）
     DrawHorizontalLine(kBarBottomY, 1);
 }
 
@@ -551,6 +551,18 @@ void LanMicApp::DrawCheckbox(int x, int y, bool checked, bool inverted) {
     display_->WriteRaw1bpp(x, y, w, h, buf.data(), buf.size());
 }
 
+void LanMicApp::DrawStrikethrough(int x, int y, int width, bool white_on_black) {
+    if (display_ == nullptr || width <= 0) {
+        return;
+    }
+    const int bytes_per_row = (width + 7) >> 3;
+    // white_on_black=true 表示选中行（黑底白字），删除线为白色(bit=0)
+    // white_on_black=false 表示普通行（白底黑字），删除线为黑色(bit=1)
+    const uint8_t fill = white_on_black ? 0x00 : 0xFF;
+    std::vector<uint8_t> buffer(bytes_per_row * 2, fill);
+    display_->WriteRaw1bpp(x, y, width, 2, buffer.data(), buffer.size());
+}
+
 void LanMicApp::UpdateDisplay() {
     UpdateLed();
 
@@ -633,7 +645,7 @@ void LanMicApp::UpdateDisplay() {
             constexpr int kTodoRowHeight = 42;
             constexpr int kTodoCheckboxX = 14;
             constexpr int kTodoTitleX = 40;
-            constexpr int kTodoTimeX = 240;
+            constexpr int kTodoTimeRightEdge = 390;
             constexpr int kTodoRowsVisible = 6;
             constexpr int kTodoTitleMaxChars = 11;
 
@@ -661,9 +673,21 @@ void LanMicApp::UpdateDisplay() {
                     std::string title = single_line(item.title, selected ? kTodoTitleMaxChars - 1 : kTodoTitleMaxChars);
                     texts.push_back({title, kTodoTitleX, row_y + 8, 24, selected});
 
-                    // 右侧时间（人性化格式）
+                    // 右侧时间（人性化格式，右对齐）
                     std::string right_text = FormatTodoRightTimeText(item.due_at, time_ptr, item.is_all_day);
-                    texts.push_back({right_text, kTodoTimeX, row_y + 12, 16, selected});
+                    int time_w = 0;
+                    for (size_t ci = 0; ci < right_text.size(); ) {
+                        unsigned char ch = static_cast<unsigned char>(right_text[ci]);
+                        if ((ch & 0xE0) == 0xC0) { time_w += 8; ci += 2; }
+                        else if ((ch & 0xF0) == 0xE0) { time_w += 16; ci += 3; }
+                        else if ((ch & 0xF8) == 0xF0) { time_w += 16; ci += 4; }
+                        else { time_w += 8; ci += 1; }
+                    }
+                    int time_x = kTodoTimeRightEdge - time_w;
+                    if (time_x < kTodoTitleX + 100) {
+                        time_x = kTodoTitleX + 100;
+                    }
+                    texts.push_back({right_text, time_x, row_y + 12, 16, selected});
                 }
 
                 // 分页指示器（右下角）
@@ -676,10 +700,11 @@ void LanMicApp::UpdateDisplay() {
             display_->DrawTexts(texts, true);
 
             // 绘制位图元素（在 DrawTexts 之后，避免被清空）
+            DrawHorizontalLine(24, 1);  // StatusBar 底部分割线（DrawTexts 会清缓冲，须在其后重绘）
             DrawWifiIcon(8, 6);
             DrawBatteryIcon(372, 8, battery_known_ ? battery_level_ : 0, battery_charging_);
 
-            // 待办列表：复选框位图 + 行间分隔线
+            // 待办列表：复选框位图 + 行间分隔线 + 已完成删除线
             if (!todo_items_.empty()) {
                 const int max_start = std::max(0, static_cast<int>(todo_items_.size()) - kTodoRowsVisible);
                 const int start_index = std::clamp(
@@ -696,12 +721,36 @@ void LanMicApp::UpdateDisplay() {
                     const int row_y = kTodoRowStartY + (row_slot * kTodoRowHeight);
                     const bool selected = index == todo_selected_index_;
 
+                    // 选中行：将上方分割线融入反色背景（首行除外，与 StatusBar 保持间距）
+                    // 反色背景起始于 row_y+4，上方分割线在 row_y-4，填充 8px 间隙
+                    if (selected && row_slot > 0) {
+                        DrawHorizontalLine(row_y - 4, 8);
+                    }
+
                     // 复选框位图（42px 行高内垂直居中，16px checkbox）
                     const bool checkbox_inverted = display_dark_style_ != selected;
                     DrawCheckbox(kTodoCheckboxX, row_y + 13, item.completed, checkbox_inverted);
 
-                    // 行间分隔线
-                    DrawHorizontalLine(row_y + kTodoRowHeight - 2, 1);
+                    // 已完成条目：绘制删除线（穿过标题文字中部）
+                    if (item.completed) {
+                        std::string title = single_line(item.title, selected ? kTodoTitleMaxChars - 1 : kTodoTitleMaxChars);
+                        int text_w = 0;
+                        for (size_t ci = 0; ci < title.size(); ) {
+                            unsigned char ch = static_cast<unsigned char>(title[ci]);
+                            if ((ch & 0xE0) == 0xC0) { text_w += 12; ci += 2; }
+                            else if ((ch & 0xF0) == 0xE0) { text_w += 24; ci += 3; }
+                            else if ((ch & 0xF8) == 0xF0) { text_w += 24; ci += 4; }
+                            else { text_w += 12; ci += 1; }
+                        }
+                        if (text_w > 0) {
+                            // 24px 字体，文字起始 y=row_y+8，删除线在文字垂直中心
+                            const int strike_y = row_y + 8 + 10;
+                            DrawStrikethrough(kTodoTitleX, strike_y, text_w, selected);
+                        }
+                    }
+
+                    // 行间分隔线（紧贴反色背景底边）
+                    DrawHorizontalLine(row_y + kTodoRowHeight - 4, 1);
                 }
             }
         }

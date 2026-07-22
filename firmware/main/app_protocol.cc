@@ -342,6 +342,7 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         UpdateDisplay();
     } else if (strcmp(type, LAN_MSG_SERVER_TODO_STATE) == 0) {
         cJSON* items = cJSON_GetObjectItemCaseSensitive(root, "items");
+        cJSON* archive_items = cJSON_GetObjectItemCaseSensitive(root, "archiveItems");
         cJSON* selected_index = cJSON_GetObjectItemCaseSensitive(root, "selectedIndex");
         const char* last_action = GetJsonString(root, "lastActionText");
         todo_items_.clear();
@@ -357,6 +358,24 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
                     id != nullptr ? id : "",
                     title,
                     GetJsonBool(item, "completed", false),
+                    GetJsonString(item, "dueAt") != nullptr ? GetJsonString(item, "dueAt") : "",
+                    GetJsonBool(item, "isAllDay", false)
+                });
+            }
+        }
+        // 将已完成条目（archiveItems）追加到列表末尾，设备上显示删除线
+        if (cJSON_IsArray(archive_items)) {
+            cJSON* item = nullptr;
+            cJSON_ArrayForEach(item, archive_items) {
+                const char* id = GetJsonString(item, "id");
+                const char* title = GetJsonString(item, "title");
+                if (title == nullptr) {
+                    continue;
+                }
+                todo_items_.push_back({
+                    id != nullptr ? id : "",
+                    title,
+                    true,  // archiveItems 始终为已完成
                     GetJsonString(item, "dueAt") != nullptr ? GetJsonString(item, "dueAt") : "",
                     GetJsonBool(item, "isAllDay", false)
                 });

@@ -259,6 +259,7 @@ private:
     void DrawBigColon(int x, int y, int scale);
     void DrawBigClock(int x, int y, int hour, int minute);
     void DrawCheckbox(int x, int y, bool checked, bool inverted);
+    void DrawStrikethrough(int x, int y, int width, bool white_on_black);
     void UpdateDisplay();
 };
 
