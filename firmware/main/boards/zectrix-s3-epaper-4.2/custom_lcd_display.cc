@@ -17,6 +17,7 @@
 
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(SourceHanSansSC_Medium_slim);
+LV_FONT_DECLARE(NotoSansSC_ExtraLight_16);
 
 #define TAG "CustomLcdDisplay"
 static constexpr uint32_t kDisplayKickMs = 1000;
@@ -1388,7 +1389,7 @@ void CustomLcdDisplay::DrawTexts(const std::vector<TextItem>& texts, bool clear)
     for (const auto& item : texts) {
         const lv_font_t* font = (item.size >= 20)
             ? &SourceHanSansSC_Medium_slim
-            : &BUILTIN_TEXT_FONT;
+            : &NotoSansSC_ExtraLight_16;
 
         render_text_to_buffer(item.content.c_str(), item.x, item.y, font, item.inverted);
 

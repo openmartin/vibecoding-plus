@@ -13,13 +13,13 @@
 #include <freertos/queue.h>
 
 #include "audio_codec.h"
+#include "display.h"
 #include "input/deferred_tap_tracker.h"
 #include "input/gpio_input_driver.h"
 
 struct cJSON;
 
 class Board;
-class Display;
 class WebSocket;
 
 class LanMicApp {
@@ -250,6 +250,7 @@ private:
     void UpdateLed();
     void PlayBeep(int freq_hz, int duration_ms);
     void DrawHorizontalLine(int y, int thickness = 1);
+    void DrawStatusBar(std::vector<Display::TextItem>& texts, const tm* time_tm);
     void DrawTodoDashLine(int y, int x_start, int x_end);
     void DrawTodoHeaderIcon(int x, int y);
     void DrawWifiIcon(int x, int y);

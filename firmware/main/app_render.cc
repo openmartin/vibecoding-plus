@@ -206,6 +206,50 @@ void LanMicApp::DrawHorizontalLine(int y, int thickness) {
     display_->WriteRaw1bpp(0, y, width, thickness, buffer.data(), buffer.size());
 }
 
+void LanMicApp::DrawStatusBar(std::vector<Display::TextItem>& texts, const tm* time_tm) {
+    constexpr int kBarBottomY = 24;
+    constexpr int kTextY = 4;
+
+    // 左侧：网络状态文字（WiFi 图标在 DrawTexts 之后绘制）
+    texts.push_back({GetNetworkLabel(), 24, kTextY, 16});
+
+    // 中间：时间 + 日期 + 星期（居中）
+    std::string center;
+    std::string phase = GetPhaseLabel();
+    if (!phase.empty()) {
+        center = phase + " ";
+    }
+    if (time_tm != nullptr) {
+        center += FormatTodoClockText(*time_tm) + " " + FormatTodoDateText(*time_tm);
+    } else {
+        center += "--:-- --/-- --";
+    }
+    int text_width = 0;
+    for (size_t i = 0; i < center.size(); ) {
+        unsigned char ch = static_cast<unsigned char>(center[i]);
+        if ((ch & 0xE0) == 0xC0) { text_width += 8; i += 2; }
+        else if ((ch & 0xF0) == 0xE0) { text_width += 16; i += 3; }
+        else if ((ch & 0xF8) == 0xF0) { text_width += 16; i += 4; }
+        else { text_width += 8; i += 1; }
+    }
+    texts.push_back({center, (400 - text_width) / 2, kTextY, 16});
+
+    // 右侧：电池百分比（充电时仅显示 +，不显示不可信百分比）
+    std::string battery_text = "--";
+    if (battery_known_) {
+        if (battery_charging_) {
+            battery_text = "+";
+        } else {
+            battery_text = std::to_string(std::clamp(battery_level_, 0, 100)) + "%";
+        }
+    }
+    int bat_w = static_cast<int>(battery_text.size()) * 8;
+    texts.push_back({battery_text, 368 - bat_w, kTextY, 16});
+
+    // StatusBar 底部 1px 分隔线
+    DrawHorizontalLine(kBarBottomY, 1);
+}
+
 void LanMicApp::DrawTodoDashLine(int y, int x_start, int x_end) {
     if (display_ == nullptr || y < 0 || y >= display_->height()) {
         return;
@@ -525,27 +569,34 @@ void LanMicApp::UpdateDisplay() {
         return lines.empty() ? std::string() : lines.front();
     };
 
+    // 统一获取时间：优先 RTC，若无效则回退到系统时间（SNTP 同步后正确）
+    tm now_tm = {};
+    bool has_time = false;
+    RtcPcf8563* rtc = ZectrixGetRtc();
+    if (rtc != nullptr) {
+        has_time = rtc->GetTime(now_tm);
+    }
+    if (!has_time || now_tm.tm_year < 120 || now_tm.tm_year > 199) {
+        time_t now = time(nullptr);
+        if (now > 1577836800) {  // 2020-01-01 00:00:00 UTC
+            localtime_r(&now, &now_tm);
+            has_time = true;
+        } else {
+            has_time = false;
+        }
+    }
+    const tm* time_ptr = has_time ? &now_tm : nullptr;
+
     if (render_page == Page::Todo) {
         if (todo_menu_open_) {
-            // 菜单模式保持原有布局
-            std::string battery_text = "--";
-            if (battery_known_) {
-                battery_text = std::to_string(std::clamp(battery_level_, 0, 100));
-                if (battery_charging_) {
-                    battery_text += "+";
-                }
-            }
-            texts.push_back({GetNetworkLabel(), 28, 9, 16});
-            texts.push_back({"待办", 96, 9, 16});
-            texts.push_back({GetPhaseLabel(), 166, 9, 16});
-            texts.push_back({battery_text, 346, 9, 16});
+            DrawStatusBar(texts, time_ptr);
 
-            texts.push_back({"待办菜单", 12, kLogTitleY, 16});
+            texts.push_back({"待办菜单", 12, 34, 16});
             std::string todo_status = todo_last_action_text_.empty() ? GetModeLabel() : todo_last_action_text_;
             if (!pending_todo_ops_.empty()) {
                 todo_status = "待同步 " + std::to_string(pending_todo_ops_.size());
             }
-            texts.push_back({single_line(todo_status, 16), 228, kLogTitleY, 16});
+            texts.push_back({single_line(todo_status, 16), 228, 34, 16});
 
             std::vector<std::string> rows;
             if (todo_menu_kind_ == TodoMenuKind::ReconnectStuck) {
@@ -564,7 +615,7 @@ void LanMicApp::UpdateDisplay() {
                 rows.push_back(single_line(row, kBodyCharsPerLine));
             }
 
-            int y = kLogBodyY;
+            int y = 56;
             for (const auto& line : rows) {
                 texts.push_back({line, 12, y, 16});
                 y += kLineHeight;
@@ -572,62 +623,25 @@ void LanMicApp::UpdateDisplay() {
 
             texts.push_back({GetFooterText(), 12, kFooterTextY, 16});
             display_->DrawTexts(texts, true);
-            DrawHorizontalLine(kStatusBarBottomY);
-            DrawHorizontalLine(kHeaderLineY);
+            DrawHorizontalLine(52, 1);
             DrawHorizontalLine(kFooterTopY);
-            DrawWifiIcon(10, 8);
-            DrawBatteryIcon(382, 12, battery_known_ ? battery_level_ : 0, battery_charging_);
+            DrawWifiIcon(8, 6);
+            DrawBatteryIcon(372, 8, battery_known_ ? battery_level_ : 0, battery_charging_);
         } else {
-            // ===== 目标图片风格布局 =====
-            // Header: 大时钟(位图) + 日期 + WiFi/电池图标
-            // 列表: 5行待办，复选框(位图)+标题+右侧时间
-            // 底部: 分页指示器
-
-            constexpr int kTodoHeaderBottomY = 68;
-            constexpr int kTodoRowStartY = 78;
-            constexpr int kTodoRowHeight = 40;
+            // ===== 统一 StatusBar + 6行待办列表布局 =====
+            constexpr int kTodoRowStartY = 28;
+            constexpr int kTodoRowHeight = 42;
             constexpr int kTodoCheckboxX = 14;
             constexpr int kTodoTitleX = 40;
-            constexpr int kTodoTimeX = 230;
-            constexpr int kTodoRowsVisible = 5;
-            constexpr int kTodoTitleMaxChars = 10;
+            constexpr int kTodoTimeX = 240;
+            constexpr int kTodoRowsVisible = 6;
+            constexpr int kTodoTitleMaxChars = 11;
 
-            // 获取时间：优先 RTC，若 RTC 数据无效则回退到系统时间（SNTP 同步后正确）
-            tm todo_tm = {};
-            bool has_time = false;
-            RtcPcf8563* rtc = ZectrixGetRtc();
-            if (rtc != nullptr) {
-                has_time = rtc->GetTime(todo_tm);
-            }
-            // RTC 年份不在 2020~2099 范围视为无效，回退到系统时间
-            if (!has_time || todo_tm.tm_year < 120 || todo_tm.tm_year > 199) {
-                time_t now = time(nullptr);
-                if (now > 1577836800) {  // 2020-01-01 00:00:00 UTC
-                    localtime_r(&now, &todo_tm);
-                    has_time = true;
-                } else {
-                    has_time = false;
-                }
-            }
-
-            // ---- 第1步：收集所有文本项 ----
-            // Header 右侧: 日期 + 星期 (右对齐，位于 WiFi/电池图标下方)
-            {
-                std::string date_text = has_time ? FormatTodoDateText(todo_tm) : "--/-- --";
-                int text_width = 0;
-                for (size_t i = 0; i < date_text.size(); ) {
-                    unsigned char ch = static_cast<unsigned char>(date_text[i]);
-                    if ((ch & 0xE0) == 0xC0) { text_width += 8; i += 2; }
-                    else if ((ch & 0xF0) == 0xE0) { text_width += 16; i += 3; }
-                    else if ((ch & 0xF8) == 0xF0) { text_width += 16; i += 4; }
-                    else { text_width += 8; i += 1; }
-                }
-                texts.push_back({date_text, 388 - text_width, 44, 16});
-            }
+            DrawStatusBar(texts, time_ptr);
 
             if (todo_items_.empty()) {
-                texts.push_back({"暂无待办", 14, 90, 24});
-                texts.push_back({IsServerConnected() ? "长按\u2193打开菜单" : "离线缓存为空", 14, 130, 16});
+                texts.push_back({"暂无待办", 14, 110, 24});
+                texts.push_back({IsServerConnected() ? "长按\u2193打开菜单" : "离线缓存为空", 14, 150, 16});
             } else {
                 const int max_start = std::max(0, static_cast<int>(todo_items_.size()) - kTodoRowsVisible);
                 const int start_index = std::clamp(
@@ -645,38 +659,25 @@ void LanMicApp::UpdateDisplay() {
                     const bool selected = index == todo_selected_index_;
 
                     std::string title = single_line(item.title, selected ? kTodoTitleMaxChars - 1 : kTodoTitleMaxChars);
-                    texts.push_back({title, kTodoTitleX, row_y, 24, selected});
+                    texts.push_back({title, kTodoTitleX, row_y + 8, 24, selected});
 
                     // 右侧时间（人性化格式）
-                    const tm* now_ptr = has_time ? &todo_tm : nullptr;
-                    std::string right_text = FormatTodoRightTimeText(item.due_at, now_ptr, item.is_all_day);
-                    texts.push_back({right_text, kTodoTimeX, row_y, 16, selected});
+                    std::string right_text = FormatTodoRightTimeText(item.due_at, time_ptr, item.is_all_day);
+                    texts.push_back({right_text, kTodoTimeX, row_y + 12, 16, selected});
                 }
 
                 // 分页指示器（右下角）
                 const int total_pages = (static_cast<int>(todo_items_.size()) + kTodoRowsVisible - 1) / kTodoRowsVisible;
                 const int current_page = start_index / kTodoRowsVisible + 1;
-                texts.push_back({std::to_string(current_page) + "-" + std::to_string(total_pages), 350, 280, 16});
+                texts.push_back({std::to_string(current_page) + "/" + std::to_string(total_pages), 362, 284, 16});
             }
 
-            // ---- 第2步：绘制文本（清空帧缓冲） ----
+            // 绘制文本（清空帧缓冲）
             display_->DrawTexts(texts, true);
 
-            // ---- 第3步：绘制位图元素（在 DrawTexts 之后，避免被清空） ----
-            // Header: 待办图标(24x28) + 大号时钟
-            DrawTodoHeaderIcon(12, 10);
-            if (has_time) {
-                DrawBigClock(44, 8, todo_tm.tm_hour, todo_tm.tm_min);
-            } else {
-                DrawBigClock(44, 8, 0, 0);
-            }
-
-            // Header 右上角: 电池 + WiFi 图标（紧贴屏幕右边缘）
-            DrawBatteryIcon(384, 10, battery_known_ ? battery_level_ : 0, battery_charging_);
-            DrawWifiIcon(366, 8);
-
-            // Header 底部分隔线（粗线）
-            DrawHorizontalLine(kTodoHeaderBottomY, 2);
+            // 绘制位图元素（在 DrawTexts 之后，避免被清空）
+            DrawWifiIcon(8, 6);
+            DrawBatteryIcon(372, 8, battery_known_ ? battery_level_ : 0, battery_charging_);
 
             // 待办列表：复选框位图 + 行间分隔线
             if (!todo_items_.empty()) {
@@ -695,35 +696,19 @@ void LanMicApp::UpdateDisplay() {
                     const int row_y = kTodoRowStartY + (row_slot * kTodoRowHeight);
                     const bool selected = index == todo_selected_index_;
 
-                    // 复选框位图（垂直居中对齐24号文字，16px checkbox）
-                    // inverted 需同时考虑全局暗色模式和行选中状态
+                    // 复选框位图（42px 行高内垂直居中，16px checkbox）
                     const bool checkbox_inverted = display_dark_style_ != selected;
-                    DrawCheckbox(kTodoCheckboxX, row_y + 4, item.completed, checkbox_inverted);
+                    DrawCheckbox(kTodoCheckboxX, row_y + 13, item.completed, checkbox_inverted);
 
-                    // 行间分隔线（每行下方都绘制，包括第5行）
-                    DrawHorizontalLine(row_y + kTodoRowHeight - 4, 1);
+                    // 行间分隔线
+                    DrawHorizontalLine(row_y + kTodoRowHeight - 2, 1);
                 }
             }
         }
     } else if (render_page == Page::Log) {
-        // 非 Todo 页面保持原有布局
-        std::string battery_text = "--";
-        if (battery_known_) {
-            battery_text = std::to_string(std::clamp(battery_level_, 0, 100));
-            if (battery_charging_) {
-                battery_text += "+";
-            }
-        }
-        texts.push_back({GetNetworkLabel(), 28, 9, 16});
-        texts.push_back({"待办", 96, 9, 16});
-        texts.push_back({GetPhaseLabel(), 166, 9, 16});
-        texts.push_back({battery_text, 346, 9, 16});
+        DrawStatusBar(texts, time_ptr);
 
-        const char* page_label = "日志";
-        texts.push_back({single_line(page_label, 18), 12, kContentHeaderY, 16});
-        texts.push_back({page_label, 316, kContentHeaderY, 16});
-
-        texts.push_back({"日志", 12, kLogTitleY, 16});
+        texts.push_back({"日志", 12, 34, 16});
 
         std::vector<std::string> wrapped;
         wrapped.push_back("暂无日志");
@@ -732,7 +717,7 @@ void LanMicApp::UpdateDisplay() {
             log_scroll_offset_,
             0,
             std::max(0, static_cast<int>(wrapped.size()) - static_cast<int>(kLogVisibleLines)));
-        int y = kLogBodyY;
+        int y = 56;
         for (const auto& line : SliceLines(wrapped, log_offset, kLogVisibleLines)) {
             texts.push_back({line, 12, y, 16});
             y += kLineHeight;
@@ -740,32 +725,16 @@ void LanMicApp::UpdateDisplay() {
 
         texts.push_back({GetFooterText(), 12, kFooterTextY, 16});
         display_->DrawTexts(texts, true);
-        DrawHorizontalLine(kStatusBarBottomY);
-        DrawHorizontalLine(kHeaderLineY);
+        DrawHorizontalLine(52, 1);
         DrawHorizontalLine(kFooterTopY);
-        DrawWifiIcon(10, 8);
-        DrawBatteryIcon(382, 12, battery_known_ ? battery_level_ : 0, battery_charging_);
+        DrawWifiIcon(8, 6);
+        DrawBatteryIcon(372, 8, battery_known_ ? battery_level_ : 0, battery_charging_);
     } else {
-        // Settings page 保持原有布局
-        std::string battery_text = "--";
-        if (battery_known_) {
-            battery_text = std::to_string(std::clamp(battery_level_, 0, 100));
-            if (battery_charging_) {
-                battery_text += "+";
-            }
-        }
-        texts.push_back({GetNetworkLabel(), 28, 9, 16});
-        texts.push_back({"待办", 96, 9, 16});
-        texts.push_back({GetPhaseLabel(), 166, 9, 16});
-        texts.push_back({battery_text, 346, 9, 16});
+        DrawStatusBar(texts, time_ptr);
 
-        const char* page_label = "设置";
-        texts.push_back({single_line(page_label, 18), 12, kContentHeaderY, 16});
-        texts.push_back({page_label, 316, kContentHeaderY, 16});
-
-        texts.push_back({"设置", 12, kLogTitleY, 16});
+        texts.push_back({"设置", 12, 34, 16});
         if (settings_editing_volume_) {
-            texts.push_back({"\u2191/\u2193 \u00B110 BOOT 确认", 180, kLogTitleY, 14});
+            texts.push_back({"\u2191/\u2193 \u00B110 BOOT 确认", 180, 34, 14});
         }
 
         const std::string vol_label = "音量: " + std::to_string(volume_) + "%";
@@ -776,7 +745,7 @@ void LanMicApp::UpdateDisplay() {
             "关机"
         };
 
-        int y = kLogBodyY;
+        int y = 56;
         for (int i = 0; i < kSettingsItemCount; ++i) {
             std::string row = (i == settings_selected_item_) ? "> " : "  ";
             row += items[i];
@@ -789,11 +758,10 @@ void LanMicApp::UpdateDisplay() {
 
         texts.push_back({GetFooterText(), 12, kFooterTextY, 16});
         display_->DrawTexts(texts, true);
-        DrawHorizontalLine(kStatusBarBottomY);
-        DrawHorizontalLine(kHeaderLineY);
+        DrawHorizontalLine(52, 1);
         DrawHorizontalLine(kFooterTopY);
-        DrawWifiIcon(10, 8);
-        DrawBatteryIcon(382, 12, battery_known_ ? battery_level_ : 0, battery_charging_);
+        DrawWifiIcon(8, 6);
+        DrawBatteryIcon(372, 8, battery_known_ ? battery_level_ : 0, battery_charging_);
     }
 
     display_->RequestUrgentRefresh();
