@@ -23,6 +23,7 @@ struct TodoItemData: Codable, Identifiable, Sendable {
     var dueAt: String?          // ISO 8601
     var source: String?         // "local", "seed", "ticktick"
     var ticktickId: String?
+    var ticktickProjectId: String?  // TickTick project the task belongs to
     var syncUpdatedAt: Double?  // epoch ms — last TickTick sync time
     var dirty: Bool             // needs sync to TickTick
     var isAllDay: Bool?         // true = all-day task (no specific time)
@@ -262,7 +263,7 @@ actor TodoService {
 
     // MARK: - TickTick Integration
 
-    func applyRemoteTickTickTask(ticktickId: String, title: String, dueDate: String?, completed: Bool, isAllDay: Bool? = nil, timeZone: String? = nil) {
+    func applyRemoteTickTickTask(ticktickId: String, title: String, dueDate: String?, completed: Bool, isAllDay: Bool? = nil, timeZone: String? = nil, projectId: String? = nil) {
         let now = epochMs()
 
         // Find existing item by ticktickId
@@ -275,12 +276,16 @@ actor TodoService {
             items[idx].syncUpdatedAt = now
             items[idx].isAllDay = isAllDay
             items[idx].timeZone = timeZone
+            items[idx].ticktickProjectId = projectId
+            items[idx].dirty = false
             if completed {
                 items[idx].completedAt = now
+                // Move completed item to archive
+                let item = items.remove(at: idx)
+                archiveItems.insert(item, at: 0)
             } else {
                 items[idx].completedAt = nil
             }
-            items[idx].dirty = false
             lastActionText = "TickTick 已同步"
             clampSelectedIndex()
             save()
@@ -299,6 +304,7 @@ actor TodoService {
             archiveItems[idx].completedAt = completed ? now : nil
             archiveItems[idx].isAllDay = isAllDay
             archiveItems[idx].timeZone = timeZone
+            archiveItems[idx].ticktickProjectId = projectId
             archiveItems[idx].dirty = false
 
             // If uncompleted, move back to active
@@ -326,6 +332,7 @@ actor TodoService {
             dueAt: dueDate,
             source: "ticktick",
             ticktickId: ticktickId,
+            ticktickProjectId: projectId,
             syncUpdatedAt: now,
             dirty: false,
             isAllDay: isAllDay,
@@ -367,6 +374,11 @@ actor TodoService {
     }
 
     func pruneRemoteMissingTickTickIds(validIds: Set<String>) {
+        // Safety: if no valid IDs returned (API issue), skip pruning to avoid data loss
+        guard !validIds.isEmpty else {
+            print("[TodoService] prune skipped: validIds is empty (possible API issue)")
+            return
+        }
         let before = items.count + archiveItems.count
         items.removeAll { item in
             guard let ticktickId = item.ticktickId, !ticktickId.isEmpty else { return false }

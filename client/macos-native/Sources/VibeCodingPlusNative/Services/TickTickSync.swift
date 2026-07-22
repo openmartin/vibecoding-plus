@@ -2,16 +2,6 @@ import Foundation
 
 // MARK: - TickTick API Models
 
-private struct TickTickProject: Decodable {
-    let id: String
-    let name: String?
-}
-
-private struct TickTickProjectData: Decodable {
-    let project: TickTickProject?
-    let tasks: [TickTickTask]?
-}
-
 private struct TickTickTask: Decodable {
     let id: String
     let projectId: String?
@@ -118,6 +108,21 @@ actor TickTickSync {
         }
     }
 
+    /// Immediately push dirty local items to TickTick (no pull).
+    /// Called when a todo completion event is received from device for instant sync.
+    func pushDirtyItems(todoService: TodoService) async {
+        guard !token.isEmpty else { return }
+        do {
+            try await pushLocalChanges(todoService: todoService)
+            status.lastSyncAt = Date()
+            status.lastError = nil
+            print("[TickTickSync] immediate push ok")
+        } catch {
+            status.lastError = error.localizedDescription
+            print("[TickTickSync] immediate push error: \(error)")
+        }
+    }
+
     // MARK: - Push Local Changes
 
     private func pushLocalChanges(todoService: TodoService) async throws {
@@ -126,11 +131,14 @@ actor TickTickSync {
 
         for item in dirtyItems {
             if let ticktickId = item.ticktickId, !ticktickId.isEmpty {
-                // Existing TickTick task: update or complete
+                // Existing TickTick task: complete or restore
                 if item.completed {
-                    try await completeTask(taskId: ticktickId, projectId: defaultProjectId ?? "inbox")
+                    let projectId = item.ticktickProjectId ?? defaultProjectId ?? "inbox"
+                    print("[TickTickSync] completing task \(ticktickId) in project \(projectId)")
+                    try await completeTask(taskId: ticktickId, projectId: projectId)
                 } else {
-                    try await updateTask(taskId: ticktickId, title: item.title, dueDate: item.dueAt)
+                    print("[TickTickSync] restoring task \(ticktickId) to uncompleted")
+                    try await updateTask(taskId: ticktickId, title: item.title, dueDate: item.dueAt, status: 0)
                 }
                 await todoService.markItemSynced(id: item.id, ticktickId: ticktickId)
             } else if !item.completed, let dueAt = item.dueAt, !dueAt.isEmpty {
@@ -161,7 +169,8 @@ actor TickTickSync {
                 dueDate: task.dueDate,
                 completed: completed,
                 isAllDay: task.isAllDay,
-                timeZone: task.timeZone
+                timeZone: task.timeZone,
+                projectId: task.projectId
             )
         }
 
@@ -173,53 +182,54 @@ actor TickTickSync {
     // MARK: - API: Fetch Today Tasks
 
     /// Fetch all tasks that appear in TickTick "Today" view:
-    /// dueDate <= end of today AND status != completed.
+    /// - Uncompleted tasks with dueDate <= end of today (via POST /task/filter)
+    /// - Tasks completed today (via POST /task/completed)
     private func fetchTodayTasks() async throws -> [TickTickTask] {
-        // Step 1: Get all projects + inbox (inbox is hidden from project list)
-        var projects = try await fetchProjects()
-        if defaultProjectId == nil {
-            defaultProjectId = projects.first?.id ?? "inbox"
-        }
-        // Always include inbox — it's not returned by GET /project
-        let inboxProject = TickTickProject(id: "inbox", name: "Inbox")
-        if !projects.contains(where: { $0.id == "inbox" }) {
-            projects.insert(inboxProject, at: 0)
-        }
-
-        // Step 2: Get tasks from each project, filter for "today"
+        let startOfToday = Calendar.current.startOfDay(for: Date())
         let endOfToday = Self.endOfTodayDate()
-        var result: [TickTickTask] = []
+        let startStr = Self.formatLocalDate(startOfToday)
+        let endStr = Self.formatLocalDate(endOfToday)
 
-        for project in projects {
-            let tasks = try await fetchTasks(projectId: project.id)
-            for task in tasks {
-                // Skip completed tasks
-                guard (task.status ?? 0) != 2 else { continue }
-                // Include if dueDate <= end of today (overdue + today)
-                if let dueDateStr = task.dueDate, !dueDateStr.isEmpty,
-                   let dueDate = Self.parseTickTickDate(dueDateStr) {
-                    if dueDate <= endOfToday {
-                        result.append(task)
-                    }
-                }
-                // Tasks without dueDate are not in "Today" view
+        // 1. Uncompleted tasks due today or overdue
+        let filterBody: [String: Any] = [
+            "endDate": endStr,
+            "status": [0]
+        ]
+        let filterData = try await performRequest(
+            url: URL(string: "\(Self.apiBase)/task/filter")!,
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: filterBody)
+        )
+        let uncompleted = try JSONDecoder().decode([TickTickTask].self, from: filterData)
+
+        // 2. Tasks completed today
+        let completedBody: [String: Any] = [
+            "startDate": startStr,
+            "endDate": endStr
+        ]
+        let completedData = try await performRequest(
+            url: URL(string: "\(Self.apiBase)/task/completed")!,
+            method: "POST",
+            body: try JSONSerialization.data(withJSONObject: completedBody)
+        )
+        let completed = try JSONDecoder().decode([TickTickTask].self, from: completedData)
+
+        // Resolve defaultProjectId from results if not yet set
+        if defaultProjectId == nil {
+            defaultProjectId = uncompleted.first?.projectId ?? completed.first?.projectId
+        }
+
+        print("[TickTickSync] filter: \(uncompleted.count) uncompleted, completed: \(completed.count) today")
+
+        // Combine, dedup by id
+        var seen = Set<String>()
+        var result: [TickTickTask] = []
+        for task in uncompleted + completed {
+            if seen.insert(task.id).inserted {
+                result.append(task)
             }
         }
-
         return result
-    }
-
-    private func fetchProjects() async throws -> [TickTickProject] {
-        let url = URL(string: "\(Self.apiBase)/project")!
-        let data = try await performRequest(url: url, method: "GET")
-        return try JSONDecoder().decode([TickTickProject].self, from: data)
-    }
-
-    private func fetchTasks(projectId: String) async throws -> [TickTickTask] {
-        let url = URL(string: "\(Self.apiBase)/project/\(projectId)/data")!
-        let data = try await performRequest(url: url, method: "GET")
-        let projectData = try JSONDecoder().decode(TickTickProjectData.self, from: data)
-        return projectData.tasks ?? []
     }
 
     // MARK: - API: Create / Update / Complete
@@ -240,10 +250,11 @@ actor TickTickSync {
         return task.id
     }
 
-    private func updateTask(taskId: String, title: String, dueDate: String?) async throws {
+    private func updateTask(taskId: String, title: String, dueDate: String?, status: Int? = nil) async throws {
         let url = URL(string: "\(Self.apiBase)/task/\(taskId)")!
         var bodyDict: [String: Any] = ["title": title]
         if let dueDate { bodyDict["dueDate"] = dueDate }
+        if let status { bodyDict["status"] = status }
         let bodyData = try JSONSerialization.data(withJSONObject: bodyDict)
         _ = try await performRequest(url: url, method: "POST", body: bodyData)
     }
@@ -303,6 +314,15 @@ actor TickTickSync {
         let now = Date()
         let startOfDay = calendar.startOfDay(for: now)
         return calendar.date(byAdding: DateComponents(day: 1, second: -1), to: startOfDay)!
+    }
+
+    /// Format a Date to local timezone string: "2026-07-23T23:59:59.000+0800"
+    private static func formatLocalDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        return formatter.string(from: date)
     }
 }
 

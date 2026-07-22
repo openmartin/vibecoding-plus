@@ -300,6 +300,7 @@ actor NativeServer {
     func updateTodo(id: String?, index: Int?, title: String?, dueAt: String?, completed: Bool?) async -> TodoSnapshot {
         if let completed {
             await todoService.toggle(id: id, index: index, completed: completed)
+            pushTickTickDirtyItems()
         }
         if title != nil || dueAt != nil {
             await todoService.update(id: id, index: index, title: title, dueAt: dueAt)
@@ -344,6 +345,14 @@ actor NativeServer {
         await sync.performSync(todoService: todoService)
         await broadcastTodoState()
         appendServiceLog("TickTick 手动同步完成")
+    }
+
+    /// Immediately push dirty items (e.g. after toggle/complete) to TickTick.
+    private func pushTickTickDirtyItems() {
+        guard let sync = ticktickSync else { return }
+        Task {
+            await sync.pushDirtyItems(todoService: todoService)
+        }
     }
 
     func updateDisplayConfig(_ dc: DisplayConfig) {
@@ -648,6 +657,7 @@ actor NativeServer {
         case "toggle", "complete":
             await todoService.toggle(id: message["id"] as? String, index: message["index"] as? Int, completed: message["completed"] as? Bool ?? true)
             resultMsg = "待办已更新"
+            pushTickTickDirtyItems()
         case "delete", "remove":
             _ = await todoService.delete(id: message["id"] as? String, index: message["index"] as? Int)
             resultMsg = "待办已删除"
@@ -694,6 +704,7 @@ actor NativeServer {
             case "toggle":
                 await todoService.toggle(id: command.id, index: command.index, completed: command.completed ?? true)
                 resultMsg = command.completed == true ? "待办已完成" : "待办已恢复"
+                pushTickTickDirtyItems()
             case "delete":
                 _ = await todoService.delete(id: command.id, index: command.index)
                 resultMsg = "待办已删除"
