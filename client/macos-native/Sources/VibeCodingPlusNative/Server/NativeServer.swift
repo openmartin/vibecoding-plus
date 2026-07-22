@@ -1009,6 +1009,8 @@ actor NativeServer {
         ]
         if let dueAt = item.dueAt { dict["dueAt"] = dueAt }
         if let ticktickId = item.ticktickId { dict["ticktickId"] = ticktickId }
+        if let isAllDay = item.isAllDay { dict["isAllDay"] = isAllDay }
+        if let timeZone = item.timeZone { dict["timeZone"] = timeZone }
         return dict
     }
 
@@ -1020,6 +1022,8 @@ actor NativeServer {
         ]
         if let dueAt = item.dueAt { dict["dueAt"] = dueAt }
         if let ticktickId = item.ticktickId { dict["ticktickId"] = ticktickId }
+        if let isAllDay = item.isAllDay { dict["isAllDay"] = isAllDay }
+        if let timeZone = item.timeZone { dict["timeZone"] = timeZone }
         return dict
     }
 }

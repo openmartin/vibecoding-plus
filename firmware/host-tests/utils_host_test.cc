@@ -76,6 +76,11 @@ void TestFormatTodoRightTimeText() {
     // 当前时间 2026-07-21 12:51 本地，dueDate 2026-07-21T16:00:00.000+0000
     // 转为本地时间后是 2026-07-22 00:00 (UTC+8)，即明天
     assert(FormatTodoRightTimeText("2026-07-21T16:00:00.000+0000", &now) == "明天 00:00");
+
+    // 全天任务（is_all_day=true）不显示时间
+    assert(FormatTodoRightTimeText("2026-07-21T16:00:00.000+0000", &now, true) == "明天");
+    // 全天任务今天到期
+    assert(FormatTodoRightTimeText("2026-07-20T16:00:00.000+0000", &now, true) == "今天");
 }
 
 } // namespace

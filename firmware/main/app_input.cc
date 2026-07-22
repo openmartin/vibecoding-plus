@@ -279,7 +279,8 @@ void LanMicApp::LoadCachedTodoState() {
                 id != nullptr ? id : "",
                 title,
                 GetJsonBool(item, "completed", false),
-                GetJsonString(item, "dueAt") != nullptr ? GetJsonString(item, "dueAt") : ""
+                GetJsonString(item, "dueAt") != nullptr ? GetJsonString(item, "dueAt") : "",
+                GetJsonBool(item, "isAllDay", false)
             });
         }
     }
@@ -331,6 +332,9 @@ std::string LanMicApp::BuildCachedTodoStateJson() const {
         cJSON_AddBoolToObject(item, "completed", todo.completed);
         if (!todo.due_at.empty()) {
             cJSON_AddStringToObject(item, "dueAt", todo.due_at.c_str());
+        }
+        if (todo.is_all_day) {
+            cJSON_AddBoolToObject(item, "isAllDay", true);
         }
         cJSON_AddItemToArray(items, item);
     }

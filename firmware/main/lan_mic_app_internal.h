@@ -92,7 +92,7 @@ std::string FormatTwoDigits(int value);
 std::string FormatTodoClockText(const tm& local_tm);
 std::string FormatTodoDateText(const tm& local_tm);
 std::string FormatTodoWeekdayText(const tm& local_tm);
-std::string FormatTodoRightTimeText(const std::string& due_at, const tm* now_tm);
+std::string FormatTodoRightTimeText(const std::string& due_at, const tm* now_tm, bool is_all_day = false);
 std::vector<std::string> WrapUtf8Lines(const std::string& text, size_t max_chars, size_t max_lines = 0);
 const char* GetJsonString(cJSON* root, const char* key);
 bool GetJsonBool(cJSON* root, const char* key, bool fallback);

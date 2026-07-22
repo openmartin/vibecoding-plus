@@ -649,7 +649,7 @@ void LanMicApp::UpdateDisplay() {
 
                     // 右侧时间（人性化格式）
                     const tm* now_ptr = has_time ? &todo_tm : nullptr;
-                    std::string right_text = FormatTodoRightTimeText(item.due_at, now_ptr);
+                    std::string right_text = FormatTodoRightTimeText(item.due_at, now_ptr, item.is_all_day);
                     texts.push_back({right_text, kTodoTimeX, row_y, 16, selected});
                 }
 

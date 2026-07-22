@@ -357,7 +357,8 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
                     id != nullptr ? id : "",
                     title,
                     GetJsonBool(item, "completed", false),
-                    GetJsonString(item, "dueAt") != nullptr ? GetJsonString(item, "dueAt") : ""
+                    GetJsonString(item, "dueAt") != nullptr ? GetJsonString(item, "dueAt") : "",
+                    GetJsonBool(item, "isAllDay", false)
                 });
             }
         }

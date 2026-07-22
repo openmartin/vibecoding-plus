@@ -102,6 +102,7 @@ private:
         std::string title;
         bool completed = false;
         std::string due_at;
+        bool is_all_day = false;
     };
     enum class PendingTodoOpType {
         Toggle,

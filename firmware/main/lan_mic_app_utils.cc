@@ -403,7 +403,7 @@ bool ParseIsoDateTimeLocal(const std::string& due_at, tm& out_tm) {
 //   今年     -> "MM/DD HH:MM"
 //   其他年份 -> "YYYY/MM/DD"
 //   无时间   -> "MM/DD"
-std::string FormatTodoRightTimeText(const std::string& due_at, const tm* now_tm) {
+std::string FormatTodoRightTimeText(const std::string& due_at, const tm* now_tm, bool is_all_day) {
     if (due_at.empty()) {
         return "";
     }
@@ -413,7 +413,8 @@ std::string FormatTodoRightTimeText(const std::string& due_at, const tm* now_tm)
         return "";
     }
 
-    const bool has_time = due_at.size() > 10 && due_at[10] == 'T';
+    // All-day tasks should not show time, even if dueDate string contains 'T'
+    const bool has_time = !is_all_day && due_at.size() > 10 && due_at[10] == 'T';
 
     // 无当前时间参考时，退回到简单格式
     if (now_tm == nullptr) {
