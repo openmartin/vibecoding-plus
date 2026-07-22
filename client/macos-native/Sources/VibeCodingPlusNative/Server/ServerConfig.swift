@@ -27,10 +27,7 @@ struct ServerConfig {
 
     // MARK: - Core Settings
 
-    var sendTarget: String = "text_injector"
     var sttProvider: String = ""
-    var transcriptDeliveryMode: String = "confirm_on_device"
-    var textInjectionMode: String = "type_and_enter"
     var port: Int = 8765
     var setupPort: Int = 8768
     var discoveryPort: Int = 8766
@@ -40,7 +37,6 @@ struct ServerConfig {
     var pairingCode: String = ""
     var lanSharedSecret: String = ""
     var lanAudioMaxBytes: Int = 10_000_000
-    var cliTimeoutSec: Double = 300
 
     // MARK: - OpenAI / Whisper
 
@@ -71,30 +67,9 @@ struct ServerConfig {
     var qwenAsrRealtimeBaseUrl: String = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
     var qwenAsrPrompt: String = ""
 
-    // MARK: - Claude Code
-
-    var claudeCommand: String = "claude"
-    var claudeCwd: String = ""
-    var claudeMaxTurns: Int = 10
-    var claudeDangerouslySkipPermissions: Bool = false
-
-    // MARK: - Codex
-
-    var codexCommand: String = "codex"
-    var codexCwd: String = ""
-    var codexSkipGitRepoCheck: Bool = false
-
-    // MARK: - Reminders
-
-    var remindersSyncEnabled: Bool = false
-    var remindctlPath: String = "remindctl"
-    var remindersListName: String = ""
-    var remindersPollSec: Int = 15
-
     // MARK: - Display
 
     var displayTodoRefreshMs: Int = 2000
-    var displayCodingRefreshMs: Int = 2000
     var displayStyle: String = "light"
 
     // MARK: - DeepSeek
@@ -103,10 +78,14 @@ struct ServerConfig {
     var deepSeekModel: String = "deepseek-chat"
     var deepSeekBaseUrl: String = "https://api.deepseek.com"
 
+    // MARK: - TickTick
+
+    var ticktickToken: String = ""
+    var ticktickSyncPollSec: Int = 60
+
     // MARK: - Debug / Test
 
     var mockTranscript: String = ""
-    var dryRunTextInjection: Bool = false
 
     // MARK: - Resolved STT Provider
 
@@ -262,10 +241,7 @@ private extension ServerConfig {
         var c = ServerConfig()
 
         // Core
-        c.sendTarget = v["SEND_TARGET"] ?? c.sendTarget
         c.sttProvider = v["STT_PROVIDER"] ?? ""
-        c.transcriptDeliveryMode = normalizeDeliveryMode(v["TRANSCRIPT_DELIVERY_MODE"])
-        c.textInjectionMode = normalizeInjectionMode(v["TEXT_INJECTION_MODE"])
         c.port = positiveInt(v["LAN_VOICE_PORT"], fallback: c.port)
         c.discoveryPort = positiveInt(v["LAN_DISCOVERY_PORT"], fallback: c.discoveryPort)
         c.discoveryEnabled = v["LAN_DISCOVERY_ENABLED"] != "0"
@@ -275,7 +251,6 @@ private extension ServerConfig {
         }
         c.lanSharedSecret = v["LAN_SHARED_SECRET"] ?? ""
         c.lanAudioMaxBytes = max(32768, positiveInt(v["LAN_AUDIO_MAX_BYTES"], fallback: c.lanAudioMaxBytes))
-        c.cliTimeoutSec = positiveDouble(v["CLI_TIMEOUT_SEC"], fallback: c.cliTimeoutSec)
 
         // OpenAI
         c.openaiApiKey = v["OPENAI_API_KEY"] ?? ""
@@ -302,26 +277,8 @@ private extension ServerConfig {
         c.qwenAsrRealtimeBaseUrl = v["QWEN_ASR_REALTIME_BASE_URL"] ?? c.qwenAsrRealtimeBaseUrl
         c.qwenAsrPrompt = v["QWEN_ASR_PROMPT"] ?? ""
 
-        // Claude Code
-        c.claudeCommand = v["CLAUDE_COMMAND"] ?? c.claudeCommand
-        c.claudeCwd = v["CLAUDE_CWD"] ?? ""
-        c.claudeMaxTurns = positiveInt(v["CLAUDE_MAX_TURNS"], fallback: c.claudeMaxTurns)
-        c.claudeDangerouslySkipPermissions = isTruthy(v["CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS"])
-
-        // Codex
-        c.codexCommand = v["CODEX_COMMAND"] ?? c.codexCommand
-        c.codexCwd = v["CODEX_CWD"] ?? ""
-        c.codexSkipGitRepoCheck = isTruthy(v["CODEX_SKIP_GIT_REPO_CHECK"])
-
-        // Reminders
-        c.remindersSyncEnabled = isTruthy(v["REMINDERS_SYNC_ENABLED"])
-        c.remindctlPath = v["REMINDCTL_PATH"] ?? c.remindctlPath
-        c.remindersListName = v["REMINDERS_LIST"] ?? ""
-        c.remindersPollSec = positiveInt(v["REMINDERS_POLL_SEC"], fallback: c.remindersPollSec)
-
         // Display
         c.displayTodoRefreshMs = clampRefreshMs(v["DISPLAY_TODO_REFRESH_MS"], fallback: c.displayTodoRefreshMs)
-        c.displayCodingRefreshMs = clampRefreshMs(v["DISPLAY_CODING_REFRESH_MS"], fallback: c.displayCodingRefreshMs)
         c.displayStyle = normalizeDisplayStyle(v["DISPLAY_STYLE"])
 
         // DeepSeek
@@ -329,28 +286,17 @@ private extension ServerConfig {
         c.deepSeekModel = v["DEEPSEEK_MODEL"] ?? c.deepSeekModel
         c.deepSeekBaseUrl = v["DEEPSEEK_BASE_URL"] ?? c.deepSeekBaseUrl
 
+        // TickTick
+        c.ticktickToken = v["TICKTICK_TOKEN"] ?? ""
+        c.ticktickSyncPollSec = positiveInt(v["TICKTICK_SYNC_POLL_SEC"], fallback: c.ticktickSyncPollSec)
+
         // Debug
         c.mockTranscript = v["MOCK_TRANSCRIPT"] ?? ""
-        c.dryRunTextInjection = isTruthy(v["DRY_RUN_TEXT_INJECTION"])
 
         return c
     }
 
     // MARK: Normalizers
-
-    static func normalizeDeliveryMode(_ raw: String?) -> String {
-        guard let v = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
-            return "confirm_on_device"
-        }
-        return v == "immediate" ? "immediate" : "confirm_on_device"
-    }
-
-    static func normalizeInjectionMode(_ raw: String?) -> String {
-        guard let v = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
-            return "type_and_enter"
-        }
-        return v == "type_only" ? "type_only" : "type_and_enter"
-    }
 
     static func normalizeDisplayStyle(_ raw: String?) -> String {
         guard let text = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {

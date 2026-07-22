@@ -70,6 +70,14 @@ bool RtcPcf8563::GetTime(tm& out_local_tm) {
     uint8_t buf[7] = {};
     ReadRegs(kRegSeconds, buf, sizeof(buf));
 
+    // bit 7 of seconds register = VL (Voltage Low / integrity) flag
+    // Log a warning but still return the time — on some boards VL is
+    // permanently set (no backup battery) yet the RTC keeps valid time
+    // while main power is present.
+    if (buf[0] & 0x80) {
+        ESP_LOGW(kTag, "RTC VL bit set, time not guaranteed (will be corrected by SNTP)");
+    }
+
     out_local_tm.tm_sec = FromBcd(buf[0] & 0x7F);
     out_local_tm.tm_min = FromBcd(buf[1] & 0x7F);
     out_local_tm.tm_hour = FromBcd(buf[2] & 0x3F);

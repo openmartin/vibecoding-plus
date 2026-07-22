@@ -38,7 +38,6 @@ private:
     GpioInputDriver up_nav_driver_;
     GpioInputDriver down_nav_driver_;
     DeferredTapTracker todo_boot_tap_;
-    DeferredTapTracker injector_boot_tap_;
     bool hello_sent_ = false;
     std::atomic<bool> ws_disconnected_pending_{false};
     std::atomic<bool> ws_connected_pending_{false};
@@ -77,10 +76,7 @@ private:
         int code = 0;
     };
     QueueHandle_t net_event_queue_ = nullptr;
-    bool has_pending_transcript_ = false;
-    std::string send_target_;         // received from server_ready: "claude_code" | "codex_exec" | "text_injector"
     int display_todo_refresh_ms_ = 800;
-    int display_coding_refresh_ms_ = 800;
     bool display_dark_style_ = false;
     std::vector<int16_t> audio_frame_buffer_; // reused across StreamAudioFrame() calls
     std::deque<std::vector<int16_t>> preroll_frames_;
@@ -88,25 +84,17 @@ private:
         Idle,
         Recording,
         Transcribing,
-        AwaitingAction,
-        Running,
         Upgrading,
         Error
     };
     enum class Page {
-        Summary,
         Todo,
         Log,
         Settings
     };
-    enum class VoiceMode {
-        Normal,
-        Todo
-    };
     enum class TodoMenuKind {
         Todo,
         TodoAction,
-        Live,
         ReconnectStuck
     };
     struct TodoItem {
@@ -143,20 +131,11 @@ private:
 
     Phase phase_ = Phase::Idle;
     Page active_page_ = Page::Todo;
-    VoiceMode voice_mode_ = VoiceMode::Todo;
     NetworkState network_state_ = NetworkState::Offline;
     std::string status_text_;
-    std::string transcript_text_;
-    std::string cli_status_text_;
-    std::string cli_phase_text_;
-    std::string latest_assistant_text_;
-    std::string repo_name_;
     std::string server_uri_;
-    std::vector<std::string> cli_log_lines_;
     std::vector<TodoItem> todo_items_;
     std::vector<PendingTodoOp> pending_todo_ops_;
-    std::vector<std::string> plan_options_;
-    int plan_selected_index_ = -1;
     int todo_selected_index_ = -1;
     std::string todo_last_action_text_;
     bool todo_menu_open_ = false;
@@ -164,15 +143,11 @@ private:
     int todo_menu_selected_item_ = 0;
     bool offline_todo_mode_ = false;
     bool reconnect_stuck_prompt_ = false;
-    bool pending_normal_after_reconnect_ = false;
     std::string hint_text_;
-    int quota_5h_remaining_pct_ = -1;
-    int quota_week_remaining_pct_ = -1;
     int battery_level_ = 0;
     bool battery_known_ = false;
     bool battery_charging_ = false;
     bool battery_discharging_ = false;
-    int summary_scroll_offset_ = 0;
     int log_scroll_offset_ = 0;
     std::string cached_server_uri_;
     std::string paired_host_id_;
@@ -224,17 +199,7 @@ private:
     bool SendHello();
     bool SendPttStart();
     bool SendPttStop();
-    bool SendEnter();
-    bool SendClearInput();
-    bool SendAction(const char* action_type);
-    bool SendSetMode(const char* mode);
     bool SendTodoCommand(const char* action, int index = 0, int completed = -1, const char* id = nullptr);
-    bool SendPlanSelect(int direction);
-    bool SendPlanApply();
-    VoiceMode DesiredVoiceModeForPage(Page page) const;
-    bool SyncVoiceModeToPage(Page page);
-    bool SyncVoiceModeToActivePage();
-    Page PageForCurrentVoiceMode() const;
     bool StreamAudioFrame();
     void CapturePrerollFrame();
     bool FlushPrerollFrames();
@@ -276,10 +241,7 @@ private:
     const char* GetNetworkLabel() const;
     std::string GetPhaseLabel() const;
     const char* GetModeLabel() const;
-    const char* GetToolLabel() const;  // "Claude" | "Codex" | "Inject"
     std::string GetFooterText() const;
-    std::string BuildPromptBody() const;
-    std::string BuildReplyBody() const;
     bool ShouldShowIdleTodoPage() const;
     void ShowIdleTodoPage();
     std::vector<std::string> WrapText(const std::string& text, size_t max_chars) const;
@@ -291,6 +253,10 @@ private:
     void DrawTodoHeaderIcon(int x, int y);
     void DrawWifiIcon(int x, int y);
     void DrawBatteryIcon(int x, int y, int level, bool charging);
+    void DrawBigDigit(int x, int y, int digit, int scale);
+    void DrawBigColon(int x, int y, int scale);
+    void DrawBigClock(int x, int y, int hour, int minute);
+    void DrawCheckbox(int x, int y, bool checked, bool inverted);
     void UpdateDisplay();
 };
 

@@ -93,16 +93,6 @@ void LanMicApp::HandleScroll(int direction) {
         return;
     }
 
-    // Clamp and update offset, then let UpdateDisplay() do the single wrap computation.
-    if (active_page_ == Page::Summary) {
-        const int next_offset = summary_scroll_offset_ + direction;
-        if (next_offset != summary_scroll_offset_ && next_offset >= 0) {
-            summary_scroll_offset_ = next_offset;
-            UpdateDisplay();
-        }
-        return;
-    }
-
     const int next_offset = log_scroll_offset_ + direction;
     if (next_offset != log_scroll_offset_ && next_offset >= 0) {
         log_scroll_offset_ = next_offset;
@@ -480,13 +470,13 @@ void LanMicApp::SavePendingTodoOps() {
 }
 
 void LanMicApp::OpenTodoMenu(TodoMenuKind kind) {
-    if (has_pending_transcript_ || phase_ == Phase::Recording || phase_ == Phase::Transcribing) {
+    if (phase_ == Phase::Recording || phase_ == Phase::Transcribing) {
         return;
     }
     todo_menu_kind_ = kind;
     todo_menu_selected_item_ = 0;
     todo_menu_open_ = true;
-    active_page_ = kind == TodoMenuKind::Live ? Page::Summary : Page::Todo;
+    active_page_ = Page::Todo;
     UpdateDisplay();
 }
 
@@ -504,10 +494,7 @@ int LanMicApp::GetTodoMenuItemCount() const {
     if (todo_menu_kind_ == TodoMenuKind::TodoAction) {
         return 3;
     }
-    if (todo_menu_kind_ == TodoMenuKind::Live) {
-        return 5;
-    }
-    return 6;
+    return 5;
 }
 
 std::string LanMicApp::GetTodoMenuItemLabel(int item) const {
@@ -520,23 +507,6 @@ std::string LanMicApp::GetTodoMenuItemLabel(int item) const {
             case 2:
                 return "重启设备";
             case 3:
-                return "返回";
-            default:
-                return "";
-        }
-    }
-
-    if (todo_menu_kind_ == TodoMenuKind::Live) {
-        switch (item) {
-            case 0:
-                return "切换到待办";
-            case 1:
-                return "重新连接主机";
-            case 2:
-                return "重启设备";
-            case 3:
-                return "设置";
-            case 4:
                 return "返回";
             default:
                 return "";
@@ -572,12 +542,10 @@ std::string LanMicApp::GetTodoMenuItemLabel(int item) const {
         case 1:
             return "删除当前项";
         case 2:
-            return "切换到编程";
-        case 3:
             return "重新连接主机";
-        case 4:
+        case 3:
             return "重启设备";
-        case 5:
+        case 4:
             return "返回";
         default:
             return "";
@@ -634,30 +602,6 @@ void LanMicApp::ExecuteTodoMenuItem(int item) {
         }
     }
 
-    if (todo_menu_kind_ == TodoMenuKind::Live) {
-        switch (item) {
-            case 0:
-                CloseTodoMenu();
-                SwitchPage(Page::Todo);
-                return;
-            case 1:
-                CloseTodoMenu();
-                RequestReconnect("正在刷新主机...");
-                return;
-            case 2:
-                restart_device();
-                return;
-            case 3:
-                CloseTodoMenu();
-                EnterSettings();
-                return;
-            case 4:
-            default:
-                CloseTodoMenu();
-                return;
-        }
-    }
-
     if (todo_menu_kind_ == TodoMenuKind::TodoAction) {
         switch (item) {
             case 0:
@@ -687,20 +631,12 @@ void LanMicApp::ExecuteTodoMenuItem(int item) {
             return;
         case 2:
             CloseTodoMenu();
-            SwitchPage(Page::Summary);
-            if (!online) {
-                pending_normal_after_reconnect_ = true;
-                RequestReconnect("正在重连编程模式...");
-            }
-            return;
-        case 3:
-            CloseTodoMenu();
             RequestReconnect(online ? "正在刷新主机..." : "正在重试主机...");
             return;
-        case 4:
+        case 3:
             restart_device();
             return;
-        case 5:
+        case 4:
         default:
             CloseTodoMenu();
             return;
@@ -764,7 +700,7 @@ void LanMicApp::RequestReconnect(const std::string& message) {
 }
 
 void LanMicApp::SwitchPage(Page page) {
-    if (has_pending_transcript_ || active_page_ == page) {
+    if (active_page_ == page) {
         return;
     }
     active_page_ = page;
@@ -772,20 +708,13 @@ void LanMicApp::SwitchPage(Page page) {
     todo_menu_open_ = false;
     settings_editing_volume_ = false;
     if (display_ != nullptr) {
-        const int interval = page == Page::Todo ? display_todo_refresh_ms_ : display_coding_refresh_ms_;
-        display_->SetSampleIntervalMs(interval);
+        display_->SetSampleIntervalMs(display_todo_refresh_ms_);
         display_->SetInverted(display_dark_style_);
-    }
-    if (page == Page::Todo || page == Page::Summary) {
-        SyncVoiceModeToPage(page);
     }
     UpdateDisplay();
 }
 
 void LanMicApp::EnterSettings() {
-    if (has_pending_transcript_) {
-        return;
-    }
     if (active_page_ != Page::Settings) {
         active_page_ = Page::Settings;
         todo_menu_open_ = false;
@@ -804,7 +733,7 @@ void LanMicApp::Shutdown() {
     DisconnectWebSocket();
     status_text_ = "关机中...";
     hint_text_ = "按 BOOT 唤醒";
-    active_page_ = Page::Summary;
+    active_page_ = Page::Todo;
     UpdateDisplay();
     vTaskDelay(pdMS_TO_TICKS(800));
     esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(BOOT_BUTTON_GPIO), 0);
@@ -893,9 +822,8 @@ void LanMicApp::Run() {
         FlushCachedTodoStateIfNeeded(now_ms);
         const bool allow_up_mode_double =
             !todo_menu_open_ &&
-            !has_pending_transcript_ &&
-            (active_page_ == Page::Todo || active_page_ == Page::Summary) &&
-            (phase_ == Phase::Idle || phase_ == Phase::Error || phase_ == Phase::Running);
+            active_page_ == Page::Todo &&
+            (phase_ == Phase::Idle || phase_ == Phase::Error);
         const int64_t up_double_window_ms = allow_up_mode_double ? kNavDoubleClickWindowMs : 0;
         up_nav_driver_.Poll(now_ms, up_double_window_ms);
         down_nav_driver_.Poll(now_ms, 0);
@@ -904,7 +832,6 @@ void LanMicApp::Run() {
 
         if (todo_boot_tap_.pending() &&
             (todo_menu_open_ ||
-             has_pending_transcript_ ||
              phase_ == Phase::Recording ||
              phase_ == Phase::Transcribing ||
              active_page_ != Page::Todo)) {
@@ -914,32 +841,10 @@ void LanMicApp::Run() {
             const bool can_toggle_selected_todo =
                 active_page_ == Page::Todo &&
                 !todo_menu_open_ &&
-                !has_pending_transcript_ &&
-                (phase_ == Phase::Idle || phase_ == Phase::Running || phase_ == Phase::Error);
+                (phase_ == Phase::Idle || phase_ == Phase::Error);
             if (can_toggle_selected_todo) {
                 ToggleSelectedTodo();
             }
-        }
-        if (injector_boot_tap_.pending() &&
-            (phase_ == Phase::Recording ||
-             phase_ == Phase::Transcribing ||
-             has_pending_transcript_ ||
-             !IsServerConnected() ||
-             send_target_ != "text_injector" ||
-             voice_mode_ != VoiceMode::Normal)) {
-            injector_boot_tap_.Cancel();
-        }
-        if (injector_boot_tap_.PollSingleReady(now_ms, IsPttPressed())) {
-            if (SendEnter()) {
-                status_text_ = "已发送回车";
-                hint_text_ = "短按 BOOT 回车";
-                phase_ = Phase::Idle;
-            } else {
-                status_text_ = "回车失败";
-                hint_text_ = "检查连接";
-                phase_ = Phase::Error;
-            }
-            UpdateDisplay();
         }
         if (connect_attempt_completed_.exchange(false, std::memory_order_acq_rel)) {
             reconnect_stuck_prompt_ = false;
@@ -1003,13 +908,9 @@ void LanMicApp::Run() {
                 RefreshNfcForOfflineSetup(cached_server_uri_);
             }
             phase_ = Phase::Idle;
-            if (active_page_ == Page::Todo || offline_todo_mode_) {
-                offline_todo_mode_ = true;
-                todo_last_action_text_ = "离线待办";
-                active_page_ = Page::Todo;
-            } else {
-                active_page_ = Page::Summary;
-            }
+            offline_todo_mode_ = true;
+            todo_last_action_text_ = "离线待办";
+            active_page_ = Page::Todo;
             disconnected_since_ms = now_ms;
             reconnect_interval_ms = kReconnectIntervalMinMs;
             reconnect_failure_count_ = 0;
@@ -1018,7 +919,6 @@ void LanMicApp::Run() {
             awaiting_pong_since_ms = 0;
             awaiting_pong_baseline_ms = 0;
             todo_boot_tap_.Cancel();
-            injector_boot_tap_.Cancel();
             UpdateDisplay();
         }
         if ((now_ms - last_battery_poll_ms) >= kBatteryPollIntervalMs) {
@@ -1032,8 +932,6 @@ void LanMicApp::Run() {
                 EnterWifiSetupMode();
             } else if (active_page_ == Page::Todo || offline_todo_mode_) {
                 OpenTodoMenu(TodoMenuKind::Todo);
-            } else if (active_page_ == Page::Summary) {
-                OpenTodoMenu(TodoMenuKind::Live);
             } else {
                 SwitchPage(Page::Todo);
             }
@@ -1058,17 +956,7 @@ void LanMicApp::Run() {
             TouchUserInput(now_ms);
         }
 
-        if (up_double_click &&
-            !has_pending_transcript_ &&
-            (active_page_ == Page::Todo || active_page_ == Page::Summary) &&
-            (phase_ == Phase::Idle || phase_ == Phase::Error || phase_ == Phase::Running)) {
-            if (todo_menu_open_) {
-                todo_menu_open_ = false;
-            }
-            SwitchPage(active_page_ == Page::Todo ? Page::Summary : Page::Todo);
-            vTaskDelay(pdMS_TO_TICKS(10));
-            continue;
-        }
+
 
         if (active_page_ == Page::Settings) {
             const bool pressed_now = IsPttPressed();
@@ -1101,7 +989,6 @@ void LanMicApp::Run() {
         if (!IsWifiConnected()) {
             if (!offline_todo_mode_ &&
                 !todo_menu_open_ &&
-                !has_pending_transcript_ &&
                 phase_ == Phase::Idle &&
                 (now_ms - disconnected_since_ms) >= kReconnectPromptTimeoutMs) {
                 EnterOfflineTodoMode("离线待办");
@@ -1135,7 +1022,6 @@ void LanMicApp::Run() {
             // Deep sleep after prolonged disconnection to preserve battery
             const int64_t idle_anchor_ms = std::max(disconnected_since_ms, last_user_input_ms_);
             if (!todo_menu_open_ &&
-                !has_pending_transcript_ &&
                 (now_ms - idle_anchor_ms) >= kNoConnectionSleepMs) {
                 EnterOfflineDeepSleep();
                 // Never reaches here — deep sleep does not return
@@ -1160,7 +1046,6 @@ void LanMicApp::Run() {
             !IsServerConnected() &&
             !connect_attempt_running_.load(std::memory_order_acquire) &&
             !todo_menu_open_ &&
-            !has_pending_transcript_ &&
             (now_ms - server_idle_anchor_ms) >= kNoConnectionSleepMs) {
             EnterOfflineDeepSleep();
             // Never reaches here
@@ -1171,7 +1056,6 @@ void LanMicApp::Run() {
             !connect_attempt_running_.load(std::memory_order_acquire) &&
             !offline_todo_mode_ &&
             !todo_menu_open_ &&
-            !has_pending_transcript_ &&
             phase_ == Phase::Idle &&
             (now_ms - disconnected_since_ms) >= kReconnectPromptTimeoutMs) {
             // Enter offline todo mode silently — do NOT open the menu,
@@ -1190,27 +1074,18 @@ void LanMicApp::Run() {
                 last_ws_ping_ms = now_ms;
                 if (!ws_->Ping()) {
                     ESP_LOGW(kLanMicTag, "WebSocket ping send failed; reconnecting");
-                    const bool should_stay_offline_todo =
-                        active_page_ == Page::Todo || offline_todo_mode_;
                     DisconnectWebSocket();
                     network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
                     status_text_ = "服务器超时";
-                    hint_text_ = should_stay_offline_todo ? "离线待办" : "正在重试主机...";
+                    hint_text_ = "离线待办";
                     phase_ = Phase::Idle;
-                    if (should_stay_offline_todo) {
-                        EnterOfflineTodoMode("离线待办");
-                    } else {
-                        active_page_ = Page::Summary;
-                    }
+                    EnterOfflineTodoMode("离线待办");
                     disconnected_since_ms = now_ms;
                     reconnect_interval_ms = kReconnectIntervalMinMs;
                     last_reconnect_ms = now_ms;
                     last_ws_ping_ms = 0;
                     awaiting_pong_since_ms = 0;
                     awaiting_pong_baseline_ms = 0;
-                    if (!should_stay_offline_todo) {
-                        StartConnectAttemptAsync();
-                    }
                     UpdateDisplay();
                     vTaskDelay(pdMS_TO_TICKS(50));
                     continue;
@@ -1237,17 +1112,10 @@ void LanMicApp::Run() {
                          static_cast<long long>(awaiting_pong_baseline_ms),
                          static_cast<long long>(awaiting_pong_since_ms),
                          static_cast<long long>(now_ms));
-                const bool should_stay_offline_todo =
-                    active_page_ == Page::Todo || offline_todo_mode_;
                 status_text_ = "服务器超时";
-                hint_text_ = should_stay_offline_todo ? "离线待办" : "正在重试主机...";
+                hint_text_ = "离线待办";
                 phase_ = Phase::Idle;
-                if (should_stay_offline_todo) {
-                    EnterOfflineTodoMode("离线待办");
-                } else {
-                    DisconnectWebSocket();
-                    active_page_ = Page::Summary;
-                }
+                EnterOfflineTodoMode("离线待办");
                 network_state_ = IsWifiConnected() ? NetworkState::Wifi : NetworkState::Offline;
                 disconnected_since_ms = now_ms;
                 reconnect_interval_ms = kReconnectIntervalMinMs;
@@ -1255,65 +1123,21 @@ void LanMicApp::Run() {
                 last_ws_ping_ms = 0;
                 awaiting_pong_since_ms = 0;
                 awaiting_pong_baseline_ms = 0;
-                if (!should_stay_offline_todo) {
-                    StartConnectAttemptAsync();
-                }
                 UpdateDisplay();
                 vTaskDelay(pdMS_TO_TICKS(50));
                 continue;
             }
         }
 
-        const bool selecting_plan =
-            active_page_ == Page::Summary &&
-            !has_pending_transcript_ &&
-            !plan_options_.empty();
-
         if (up_click) {
-            if (has_pending_transcript_ && send_target_ != "text_injector") {
-                if (IsServerConnected()) {
-                    SendAction(LAN_MSG_DEVICE_ACTION_SEND);
-                } else {
-                    disconnected_since_ms = now_ms;
-                    reconnect_interval_ms = kReconnectIntervalMinMs;
-                    last_reconnect_ms = now_ms;
-                    StartConnectAttemptAsync();
-                    status_text_ = "连接中";
-                    hint_text_ = "正在重试主机...";
-                    UpdateDisplay();
-                }
-            } else if (selecting_plan) {
-                if (!SendPlanSelect(-1)) {
-                    status_text_ = "方案选择失败";
-                    hint_text_ = "检查连接";
-                    UpdateDisplay();
-                }
-            } else if (active_page_ == Page::Todo) {
+            if (active_page_ == Page::Todo) {
                 MoveTodoSelection(-1);
             } else {
                 HandleScroll(-1);
             }
         }
         if (down_click) {
-            if (has_pending_transcript_ && send_target_ != "text_injector") {
-                if (IsServerConnected()) {
-                    SendAction(LAN_MSG_DEVICE_ACTION_UNDO);
-                } else {
-                    disconnected_since_ms = now_ms;
-                    reconnect_interval_ms = kReconnectIntervalMinMs;
-                    last_reconnect_ms = now_ms;
-                    StartConnectAttemptAsync();
-                    status_text_ = "连接中";
-                    hint_text_ = "正在重试主机...";
-                    UpdateDisplay();
-                }
-            } else if (selecting_plan) {
-                if (!SendPlanSelect(1)) {
-                    status_text_ = "方案选择失败";
-                    hint_text_ = "检查连接";
-                    UpdateDisplay();
-                }
-            } else if (active_page_ == Page::Todo) {
+            if (active_page_ == Page::Todo) {
                 MoveTodoSelection(1);
             } else {
                 HandleScroll(1);
@@ -1333,54 +1157,6 @@ void LanMicApp::Run() {
             boot_pressed_since_ms = now_ms;
             TouchUserInput(now_ms);
             todo_hold_started = false;
-            const bool selecting_plan =
-                active_page_ == Page::Summary &&
-                !has_pending_transcript_ &&
-                !plan_options_.empty();
-            if (selecting_plan) {
-                if (!IsServerConnected()) {
-                    disconnected_since_ms = now_ms;
-                    reconnect_interval_ms = kReconnectIntervalMinMs;
-                    last_reconnect_ms = now_ms;
-                    StartConnectAttemptAsync();
-                    status_text_ = "连接中";
-                    hint_text_ = "正在重试主机...";
-                    UpdateDisplay();
-                } else if (SendPlanApply()) {
-                    status_text_ = "正在应用方案";
-                    hint_text_ = "等待结果";
-                    phase_ = Phase::Running;
-                    plan_options_.clear();
-                    plan_selected_index_ = -1;
-                    summary_scroll_offset_ = 0;
-                    UpdateDisplay();
-                } else {
-                    status_text_ = "方案应用失败";
-                    hint_text_ = "检查连接";
-                    UpdateDisplay();
-                }
-                last_pressed = true;
-                vTaskDelay(pdMS_TO_TICKS(20));
-                continue;
-            }
-            const bool defer_normal_short_enter_press =
-                !has_pending_transcript_ &&
-                IsServerConnected() &&
-                send_target_ == "text_injector" &&
-                voice_mode_ == VoiceMode::Normal &&
-                (phase_ == Phase::Idle || phase_ == Phase::Running);
-            const bool can_todo_direct_short_action =
-                active_page_ == Page::Todo &&
-                !has_pending_transcript_ &&
-                (phase_ == Phase::Idle || phase_ == Phase::Error || phase_ == Phase::Running);
-            const bool defer_page_press =
-                defer_normal_short_enter_press ||
-                can_todo_direct_short_action;
-            if (defer_page_press) {
-                last_pressed = true;
-                vTaskDelay(pdMS_TO_TICKS(10));
-                continue;
-            }
             if (!IsServerConnected()) {
                 disconnected_since_ms = now_ms;
                 reconnect_interval_ms = kReconnectIntervalMinMs;
@@ -1391,7 +1167,6 @@ void LanMicApp::Run() {
                 phase_ = Phase::Idle;
                 UpdateDisplay();
             } else {
-                SyncVoiceModeToActivePage();
                 ESP_LOGI(kLanMicTag, "PTT start");
                 SendPttStart();
                 phase_ = Phase::Recording;
@@ -1407,20 +1182,12 @@ void LanMicApp::Run() {
 
         if (pressed &&
             last_pressed &&
-            (active_page_ == Page::Todo || active_page_ == Page::Summary) &&
+            active_page_ == Page::Todo &&
             !todo_hold_started &&
             boot_pressed_since_ms > 0 &&
-            !has_pending_transcript_ &&
-            (phase_ == Phase::Idle || phase_ == Phase::Error || phase_ == Phase::Running) &&
+            (phase_ == Phase::Idle || phase_ == Phase::Error) &&
             IsServerConnected() &&
             (now_ms - boot_pressed_since_ms) >= kTodoBootHoldMs) {
-            if (!SyncVoiceModeToActivePage()) {
-                status_text_ = "模式错误";
-                hint_text_ = "请重试";
-                UpdateDisplay();
-                vTaskDelay(pdMS_TO_TICKS(20));
-                continue;
-            }
             todo_hold_started = true;
             ESP_LOGI(kLanMicTag, "PTT start from page hold");
             SendPttStart();
@@ -1441,34 +1208,9 @@ void LanMicApp::Run() {
                 phase_ = Phase::Transcribing;
                 status_text_ = "转写中";
                 UpdateDisplay();
-            } else if (!todo_hold_started &&
-                       boot_pressed_since_ms > 0 &&
-                       !has_pending_transcript_ &&
-                       (phase_ == Phase::Idle || phase_ == Phase::Running) &&
-                       IsServerConnected() &&
-                       send_target_ == "text_injector" &&
-                       voice_mode_ == VoiceMode::Normal) {
-                if (injector_boot_tap_.OnShortRelease(now_ms) ==
-                    DeferredTapTracker::ReleaseResult::DoubleTap) {
-                    if (SendClearInput()) {
-                        status_text_ = "已清空输入";
-                        hint_text_ = "连按两次 BOOT 清空";
-                        phase_ = Phase::Idle;
-                    } else {
-                        status_text_ = "清空失败";
-                        hint_text_ = "检查连接";
-                        phase_ = Phase::Error;
-                    }
-                } else {
-                    status_text_ = "短按 BOOT";
-                    hint_text_ = "再按一次清空";
-                    phase_ = Phase::Idle;
-                }
-                UpdateDisplay();
             } else if (active_page_ == Page::Todo &&
                        !todo_hold_started &&
-                       boot_pressed_since_ms > 0 &&
-                       !has_pending_transcript_) {
+                       boot_pressed_since_ms > 0) {
                 todo_boot_tap_.OnShortRelease(now_ms);
             }
             boot_pressed_since_ms = 0;
@@ -1485,8 +1227,7 @@ void LanMicApp::Run() {
             }
 
             if (IsServerConnected() &&
-                !has_pending_transcript_ &&
-                (active_page_ == Page::Todo || active_page_ == Page::Summary) &&
+                active_page_ == Page::Todo &&
                 (battery_charging_ || !battery_known_)) {
                 CapturePrerollFrame();
                 vTaskDelay(pdMS_TO_TICKS(1));
@@ -1497,13 +1238,11 @@ void LanMicApp::Run() {
         }
 
         // Only capture preroll when voice input is plausible (connected +
-        // on a voice-capable page and no pending transcript).  On other
-        // pages or when disconnected, skip the 20 ms codec read so the
-        // CPU can idle longer between button polls.
+        // on the todo page). On other pages or when disconnected, skip the
+        // 20 ms codec read so the CPU can idle longer between button polls.
         const bool voice_ready = IsServerConnected() &&
-            !has_pending_transcript_ &&
             !todo_menu_open_ &&
-            (active_page_ == Page::Summary || active_page_ == Page::Todo) &&
+            active_page_ == Page::Todo &&
             (battery_charging_ || !battery_known_);
         if (voice_ready) {
             CapturePrerollFrame();

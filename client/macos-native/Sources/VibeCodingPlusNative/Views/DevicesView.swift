@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+
 struct DevicesView: View {
     @EnvironmentObject private var state: AppState
 
@@ -77,7 +78,6 @@ struct DeviceCard: View {
     let device: DeviceInfo
     @State private var idCopied = false
 
-    private var currentMode: String { device.voiceMode ?? "normal" }
     private var boardType: String { device.boardType ?? "未知板型" }
 
     var body: some View {
@@ -85,7 +85,6 @@ struct DeviceCard: View {
             VStack(alignment: .leading, spacing: 14) {
                 headerRow
                 metaGrid
-                modeSwitcher
                 deviceActions
                 otaProgressRow
             }
@@ -219,8 +218,6 @@ struct DeviceCard: View {
         HStack(spacing: 0) {
             metaItem("板型", device.boardType ?? "--", icon: "cpu")
             metaDivider
-            metaItem("当前模式", currentModeLabel, icon: "rectangle.on.rectangle")
-            metaDivider
             metaItem("连接时长", connectedDuration, icon: "clock")
         }
         .padding(12)
@@ -250,61 +247,6 @@ struct DeviceCard: View {
                 .truncationMode(.tail)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var modeSwitcher: some View {
-        HStack(spacing: 10) {
-            Text("切换模式")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            modeButton(title: "编程", icon: "chevron.left.forwardslash.chevron.right", mode: "normal")
-            modeButton(title: "备忘", icon: "checklist", mode: "todo")
-            Spacer()
-        }
-    }
-
-    private func modeButton(title: String, icon: String, mode: String) -> some View {
-        let isActive = currentMode == mode
-        return Button {
-            Task { await state.setDeviceVoiceMode(device, mode: mode) }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.caption.weight(.semibold))
-                Text(title)
-                    .font(.callout.weight(isActive ? .semibold : .medium))
-            }
-            .foregroundStyle(isActive ? Color.white : .primary)
-            .padding(.horizontal, 14)
-            .frame(height: 30)
-            .background(
-                Group {
-                    if isActive {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(InkTheme.accent)
-                    } else {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.primary.opacity(0.05))
-                    }
-                }
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(isActive ? Color.clear : .primary.opacity(0.18), lineWidth: 1)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .disabled(isActive)
-        .opacity(isActive ? 1 : 0.85)
-    }
-
-    private var currentModeLabel: String {
-        switch currentMode {
-        case "todo": "备忘"
-        case "normal": "编程"
-        default: "--"
-        }
     }
 
     private var connectedDuration: String {

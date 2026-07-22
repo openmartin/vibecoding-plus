@@ -25,6 +25,7 @@
 #include <esp_sleep.h>
 #include <esp_wifi.h>
 #include <esp_netif.h>
+#include <esp_sntp.h>
 
 #include "board.h"
 #include "boards/zectrix-s3-epaper-4.2/config.h"
@@ -67,8 +68,7 @@ LanMicApp::LanMicApp()
                        kNavLongPressMs,
                        kNavShortPressMinMs,
                        kNavShortPressMaxMs),
-      todo_boot_tap_(kTodoBootDoubleClickWindowMs),
-      injector_boot_tap_(kInjectorBootDoubleClickWindowMs) {
+      todo_boot_tap_(kTodoBootDoubleClickWindowMs) {
     wifi_event_group_ = xEventGroupCreate();
     server_msg_queue_ = xQueueCreate(16, sizeof(PendingServerMessage));
     net_event_queue_ = xQueueCreate(16, sizeof(PendingNetMessage));
@@ -95,6 +95,10 @@ LanMicApp::~LanMicApp() {
 }
 
 bool LanMicApp::Initialize() {
+    // 设置时区为中国标准时间 (UTC+8)，确保 RTC/显示使用北京时间
+    setenv("TZ", "CST-8", 1);
+    tzset();
+
     codec_ = board_.GetAudioCodec();
     display_ = board_.GetDisplay();
     if (codec_ == nullptr) {
@@ -113,12 +117,6 @@ bool LanMicApp::Initialize() {
     codec_->SetOutputVolume(volume_);
 
     status_text_ = "启动 Wi‑Fi";
-    cli_status_text_ = "CLI 空闲";
-    cli_phase_text_ = "空闲";
-    transcript_text_.clear();
-    latest_assistant_text_.clear();
-    repo_name_ = "AI";
-    send_target_.clear();
     server_uri_.clear();
 #if !CONFIG_LAN_DISCOVERY_ENABLED
     if (!cached_server_uri_.empty()) {
@@ -128,11 +126,8 @@ bool LanMicApp::Initialize() {
     }
 #endif
     audio_frame_buffer_.resize(kFrameSamples);
-    cli_log_lines_.clear();
-    active_page_ = Page::Summary;
-    voice_mode_ = VoiceMode::Normal;
+    active_page_ = Page::Todo;
     display_todo_refresh_ms_ = 2000;
-    display_coding_refresh_ms_ = 2000;
     display_dark_style_ = false;
     hint_text_ = "长按UP打开菜单\n长按BOOT开始语音";
     phase_ = Phase::Idle;
@@ -169,34 +164,6 @@ bool LanMicApp::Initialize() {
 
     board_.StartNetwork();
     return true;
-}
-
-LanMicApp::VoiceMode LanMicApp::DesiredVoiceModeForPage(Page page) const {
-    return page == Page::Todo ? VoiceMode::Todo : VoiceMode::Normal;
-}
-
-bool LanMicApp::SyncVoiceModeToPage(Page page) {
-    const VoiceMode desired = DesiredVoiceModeForPage(page);
-    if (!IsServerConnected()) {
-        voice_mode_ = desired;
-        return false;
-    }
-    if (voice_mode_ == desired) {
-        return true;
-    }
-    if (!SendSetMode(desired == VoiceMode::Todo ? "todo" : "normal")) {
-        return false;
-    }
-    voice_mode_ = desired;
-    return true;
-}
-
-bool LanMicApp::SyncVoiceModeToActivePage() {
-    return SyncVoiceModeToPage(active_page_);
-}
-
-LanMicApp::Page LanMicApp::PageForCurrentVoiceMode() const {
-    return voice_mode_ == VoiceMode::Todo ? Page::Todo : Page::Summary;
 }
 
 bool LanMicApp::StreamAudioFrame() {
@@ -325,6 +292,44 @@ void LanMicApp::HandleNetEvent(const PendingNetMessage& message) {
             if (!cached_server_uri_.empty()) {
                 RefreshNfcForOfflineSetup(cached_server_uri_);
             }
+            // SNTP 同步网络时间到 RTC
+            {
+                // 设置时区为中国标准时间 (UTC+8)
+                setenv("TZ", "CST-8", 1);
+                tzset();
+
+                esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+                esp_sntp_setservername(0, "ntp.aliyun.com");
+                esp_sntp_setservername(1, "cn.pool.ntp.org");
+                esp_sntp_setservername(2, "pool.ntp.org");
+                esp_sntp_init();
+                // 等待 SNTP 同步（最多 10 秒）
+                int retry = 0;
+                while (esp_sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET && ++retry < 100) {
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                }
+                if (esp_sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
+                    time_t now = time(nullptr);
+                    tm local_tm = {};
+                    localtime_r(&now, &local_tm);
+                    // 合法性校验：年份必须在 2020~2099 之间，防止用错误时间覆盖 RTC
+                    if (local_tm.tm_year >= 120 && local_tm.tm_year <= 199) {
+                        RtcPcf8563* rtc = ZectrixGetRtc();
+                        if (rtc != nullptr) {
+                            rtc->SetTime(local_tm);
+                            ESP_LOGI(kLanMicTag, "RTC synced via SNTP: %04d-%02d-%02d %02d:%02d:%02d",
+                                     local_tm.tm_year + 1900, local_tm.tm_mon + 1, local_tm.tm_mday,
+                                     local_tm.tm_hour, local_tm.tm_min, local_tm.tm_sec);
+                        }
+                    } else {
+                        ESP_LOGW(kLanMicTag, "SNTP returned invalid year %d, skip RTC write",
+                                 local_tm.tm_year + 1900);
+                    }
+                } else {
+                    ESP_LOGW(kLanMicTag, "SNTP sync timeout");
+                }
+                esp_sntp_stop();
+            }
             break;
         case PendingNetEvent::WifiDisconnected:
             ESP_LOGW(kLanMicTag, "WiFi disconnected");
@@ -334,12 +339,9 @@ void LanMicApp::HandleNetEvent(const PendingNetMessage& message) {
             hint_text_ = "检查 Wi‑Fi\n长按上下键进入配网";
             server_uri_.clear();
             DisconnectWebSocket();
-            if (active_page_ == Page::Todo) {
-                offline_todo_mode_ = true;
-                todo_last_action_text_ = "离线待办";
-            } else {
-                active_page_ = Page::Summary;
-            }
+            active_page_ = Page::Todo;
+            offline_todo_mode_ = true;
+            todo_last_action_text_ = "离线待办";
             UpdateDisplay();
             break;
         case PendingNetEvent::WifiConfigEnter:
@@ -347,8 +349,7 @@ void LanMicApp::HandleNetEvent(const PendingNetMessage& message) {
             network_state_ = NetworkState::Config;
             status_text_ = "Wi‑Fi 配网模式";
             hint_text_ = message.data;
-            active_page_ = Page::Summary;
-            summary_scroll_offset_ = 0;
+            active_page_ = Page::Todo;
             UpdateDisplay();
             UpdateNfcProvisionUri(message.data);
             break;
@@ -359,8 +360,7 @@ void LanMicApp::HandleNetEvent(const PendingNetMessage& message) {
                 ESP_LOGW(kLanMicTag, "WiFi config mode exited without saved credentials; skip reboot");
                 status_text_ = "Wi‑Fi 配网模式";
                 hint_text_ = "未检测到已保存网络";
-                active_page_ = Page::Summary;
-                summary_scroll_offset_ = 0;
+                active_page_ = Page::Todo;
                 UpdateDisplay();
                 break;
             }
@@ -374,7 +374,7 @@ void LanMicApp::HandleNetEvent(const PendingNetMessage& message) {
             status_text_ = "服务器错误";
             hint_text_ = "将自动重试";
             phase_ = Phase::Error;
-            active_page_ = Page::Summary;
+            active_page_ = Page::Todo;
             UpdateDisplay();
             break;
     }
@@ -408,4 +408,3 @@ void LanMicApp::DrainPendingEvents(int64_t now_ms) {
         HandleNetEvent(error);
     }
 }
-

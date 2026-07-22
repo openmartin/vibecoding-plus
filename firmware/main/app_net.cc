@@ -291,8 +291,7 @@ void LanMicApp::RequestWifiReconfigureByReboot(const char* status_text, const ch
 
     status_text_ = status_text != nullptr ? status_text : "重启中...";
     hint_text_ = hint_text != nullptr ? hint_text : "正在重新配置 Wi‑Fi";
-    active_page_ = Page::Summary;
-    summary_scroll_offset_ = 0;
+    active_page_ = Page::Todo;
     UpdateDisplay();
 
     if (xTaskCreate([](void* arg) {
@@ -768,11 +767,9 @@ void LanMicApp::EnterWifiSetupMode() {
     ClearPersistedHost();
     DisconnectWebSocket();
     xEventGroupClearBits(wifi_event_group_, kWifiConnectedBit);
-    has_pending_transcript_ = false;
     phase_ = Phase::Idle;
     network_state_ = NetworkState::Config;
-    active_page_ = Page::Summary;
-    summary_scroll_offset_ = 0;
+    active_page_ = Page::Todo;
     status_text_ = "Wi‑Fi 配网";
     hint_text_ = "正在启动配网热点...";
     UpdateDisplay();
@@ -819,9 +816,6 @@ void LanMicApp::RecoverWifiForReconnect(const char* reason) {
     status_text_ = "重置 WiFi";
     hint_text_ = reason ? reason : "正在恢复连接...";
     phase_ = Phase::Idle;
-    if (active_page_ != Page::Todo || !offline_todo_mode_) {
-        active_page_ = Page::Summary;
-    }
     UpdateDisplay();
 }
 

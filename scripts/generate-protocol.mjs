@@ -65,10 +65,6 @@ enum LANProtocol {
 ${swiftEnum('LANDeviceMessage', spec.device_to_server)}
 
 ${swiftEnum('LANServerMessage', spec.server_to_device)}
-
-${swiftEnum('LANSendTarget', spec.send_targets)}
-
-${swiftEnum('LANVoiceMode', spec.voice_modes)}
 `;
 writeFileSync(swiftPath, swiftBody);
 

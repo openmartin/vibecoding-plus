@@ -1287,10 +1287,11 @@ static uint32_t utf8_next(const char** pp) {
 // =======================================================
 // 文本渲染：用 LVGL 字体 API 逐字符写入 1bpp 帧缓冲
 // =======================================================
-void CustomLcdDisplay::render_text_to_buffer(const char* text, int start_x, int start_y, const lv_font_t* font) {
+void CustomLcdDisplay::render_text_to_buffer(const char* text, int start_x, int start_y, const lv_font_t* font, bool item_inverted) {
     int cursor_x = start_x;
     int cursor_y = start_y;
     const char* p = text;
+    const bool white = inverted_ ^ item_inverted;
 
     while (*p) {
         uint32_t ch = utf8_next(&p);
@@ -1334,7 +1335,7 @@ void CustomLcdDisplay::render_text_to_buffer(const char* text, int start_x, int 
                     int px = gx + col;
                     int py = gy + row;
                     if (px >= 0 && px < Width && py >= 0 && py < Height) {
-                        set_pixel_1bpp(buffer, Width, px, py, inverted_);  // inverted: text white, normal: text black
+                        set_pixel_1bpp(buffer, Width, px, py, white);  // item_inverted: text white, normal: text black
                     }
                 }
             }
@@ -1358,11 +1359,38 @@ void CustomLcdDisplay::DrawTexts(const std::vector<TextItem>& texts, bool clear)
     int max_y = 0;
     bool has_dirty_text = false;
 
+    // 第一遍：填充所有反色项的黑色背景（避免后面的背景覆盖前面已渲染的文字）
+    for (const auto& item : texts) {
+        if (!item.inverted) continue;
+        const int bg_x = 0;
+        const int bg_y = item.y - 4;
+        const int bg_w = Width;
+        const int bg_h = item.size + 10;
+        const int dst_bytes_per_row = (Width + 7) >> 3;
+        for (int row = 0; row < bg_h; ++row) {
+            int dy = bg_y + row;
+            if (dy < 0 || dy >= Height) continue;
+            for (int col = 0; col < bg_w; ++col) {
+                int dx = bg_x + col;
+                if (dx < 0 || dx >= Width) continue;
+                uint32_t idx = (uint32_t)dy * dst_bytes_per_row + (uint32_t)(dx >> 3);
+                uint8_t mask = (uint8_t)(1U << (7 - (dx & 0x07)));
+                buffer[idx] &= ~mask;  // 黑色背景
+            }
+        }
+        min_x = std::min(min_x, bg_x);
+        min_y = std::min(min_y, bg_y);
+        max_x = std::max(max_x, bg_x + bg_w);
+        max_y = std::max(max_y, bg_y + bg_h);
+    }
+
+    // 第二遍：渲染所有文字
     for (const auto& item : texts) {
         const lv_font_t* font = (item.size >= 20)
             ? &SourceHanSansSC_Medium_slim
             : &BUILTIN_TEXT_FONT;
-        render_text_to_buffer(item.content.c_str(), item.x, item.y, font);
+
+        render_text_to_buffer(item.content.c_str(), item.x, item.y, font, item.inverted);
 
         const int text_w = static_cast<int>(item.content.size()) * item.size;
         const int text_h = item.size + 6;

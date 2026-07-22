@@ -1,11 +1,9 @@
 import SwiftUI
-// MARK: - Navigation
 
 enum SidebarTab: String, CaseIterable, Identifiable {
     case overview
     case devices
     case todo
-    case reminders
     case display
     case environment
     case settings
@@ -18,7 +16,6 @@ enum SidebarTab: String, CaseIterable, Identifiable {
         case .overview: "概览"
         case .devices: "设备"
         case .todo: "待办"
-        case .reminders: "提醒"
         case .display: "显示"
         case .environment: "环境"
         case .settings: "设置"
@@ -31,7 +28,6 @@ enum SidebarTab: String, CaseIterable, Identifiable {
         case .overview: "square.grid.2x2"
         case .devices: "display.2"
         case .todo: "checklist"
-        case .reminders: "bell.badge"
         case .display: "rectangle.on.rectangle"
         case .environment: "checkmark.shield"
         case .settings: "slider.horizontal.3"
@@ -41,7 +37,7 @@ enum SidebarTab: String, CaseIterable, Identifiable {
 
     var group: SidebarGroup {
         switch self {
-        case .overview, .devices, .todo, .reminders: .main
+        case .overview, .devices, .todo: .main
         case .display, .environment: .tools
         case .settings, .logs: .system
         }
@@ -134,10 +130,8 @@ struct RootView: View {
 
     private var sidebar: some View {
         ZStack {
-            // 墨水屏纸色背景，与右侧主区一致
             InkTheme.paper
             InkDitherBackground(opacity: 0.3, step: 7)
-            // 右侧分隔线，模拟墨水屏边框
             HStack(spacing: 0) {
                 Spacer()
                 Rectangle()
@@ -271,8 +265,6 @@ struct RootView: View {
             DevicesView()
         case .todo:
             TodoView()
-        case .reminders:
-            RemindersView()
         case .display:
             DisplayConfigView()
         case .environment:

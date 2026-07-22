@@ -1,5 +1,4 @@
 import SwiftUI
-// MARK: - Overview
 
 struct OverviewView: View {
     @EnvironmentObject private var state: AppState
@@ -28,23 +27,18 @@ struct OverviewView: View {
                 MetricView(title: "设备", value: "\(state.devices.count)",
                            detail: state.serviceStatus?.discoveryEnabled == true ? "发现已启用" : "发现未启用", symbol: "display",
                            tone: !state.devices.isEmpty ? .accent : .idle)
-                MetricView(title: "发送目标", value: state.config.sendTarget.label,
-                           detail: deliveryLabel, symbol: "paperplane",
-                           tone: .accent)
                 MetricView(title: "语音识别", value: state.config.sttProvider.label,
                            detail: state.serviceStatus?.sttProvider ?? "未启动", symbol: "waveform",
                            tone: .accent)
+                MetricView(title: "待办", value: "\(state.todos.count)",
+                           detail: "\(state.archivedTodos.count) 已归档", symbol: "checklist",
+                           tone: .accent)
             }
 
-            // 实时活动 + 服务状态 固定比例分栏，顶部对齐；填满剩余高度避免留白
             HStack(alignment: .top, spacing: 16) {
                 InkPanel(title: "实时活动", symbol: "dot.radiowaves.left.and.right", accent: true) {
                     VStack(spacing: 0) {
                         LiveField(label: "语音识别", value: state.liveActivity.lastTranscript, icon: "waveform")
-                        InkDivider()
-                        LiveField(label: "用户文本", value: state.liveActivity.lastUserText, icon: "person")
-                        InkDivider()
-                        LiveField(label: "AI 回复", value: state.liveActivity.lastAssistantText, icon: "sparkles")
                     }
                     Spacer(minLength: 0)
                 }
@@ -55,8 +49,6 @@ struct OverviewView: View {
                         InfoRow("Host ID", state.config.discoveryHostId)
                         InfoRow("端口", "\(state.config.port)")
                         InfoRow("发现端口", "\(state.config.discoveryPort)")
-                        InfoRow("CLI", state.liveActivity.cliStatus.isEmpty ? "--" : state.liveActivity.cliStatus)
-                        InfoRow("运行模式", state.config.sendTarget.label)
                         InfoRow("STT", state.config.sttProvider.label)
                     }
                     Spacer(minLength: 0)
@@ -65,16 +57,6 @@ struct OverviewView: View {
                 .frame(maxHeight: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-            // 近期日志 / 编程过程日志已移除：请到「日志」页面查看完整日志
-        }
-    }
-
-    private var deliveryLabel: String {
-        switch state.config.transcriptDeliveryMode {
-        case "immediate": "立即输入"
-        case "confirm_on_device": "设备确认"
-        default: state.config.transcriptDeliveryMode
         }
     }
 }

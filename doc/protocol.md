@@ -1,3 +1,63 @@
+# LAN WebSocket Protocol v2
+
+> `protocolVersion: 2` — carried in `hello_ack` and `server_ready`.  
+> Firmware constant: `kProtocolVersion` in `lan_mic_app.cc`.
+
+## Transport
+
+- WebSocket (RFC 6455), server → client path: macOS `NativeServer` on `LAN_VOICE_PORT` (default **8765**).
+- Text frames: JSON objects with required `type` string field.
+- Binary frames: PCM16 mono 16 kHz audio during PTT (device → server only).
+
+## Authentication
+
+When `LAN_SHARED_SECRET` is set:
+
+1. Server → device: `auth_challenge { serverNonce }`
+2. Device → server: `hello` with `sig = HMAC(secret, "hello|deviceId|boardType|serverNonce|deviceNonce")`
+
+Without secret, `hello` may omit `sig` / `deviceNonce`.
+
+## Device → Server
+
+| type | Fields | Semantics |
+|---|---|---|
+| `hello` | `deviceId`, `boardType`, `deviceNonce?`, `sig?` | Handshake after WS connect |
+| `ptt_start` | `ts?`, `source?` | Begin audio capture |
+| `ptt_stop` | `ts?` | End capture; server transcribes and dispatches to todo assistant |
+| `todo_command` | `action`, `index?`, `id?`, `completed?`, `text?`, `dueAt?` | Todo CRUD |
+| `ping` | — | Keepalive |
+| `firmware_progress` | `phase`, `pct`, `error?` | OTA progress report |
+| `firmware_result` | `ok`, `version?`, `message?` | OTA result report |
+| `firmware_check_result` | `needUpgrade`, `version?` | OTA version check response |
+| `discover_host` | — | UDP discovery broadcast |
+
+## Server → Device
+
+| type | Fields | Semantics |
+|---|---|---|
+| `auth_challenge` | `serverNonce` | Challenge for HMAC hello |
+| `hello_ack` | `deviceId`, `protocolVersion` | Handshake accepted |
+| `server_ready` | `protocolVersion`, `authRequired`, `displayTodoRefreshMs`, `displayStyle` | Runtime config snapshot |
+| `display_config` | `todoRefreshMs`, `style` | E-paper layout tuning |
+| `transcript_final` | `text`, `latencyMs?` | STT result |
+| `transcript_partial` | `text` | Streaming STT partial result |
+| `transcript_cleared` | — | Pending transcript emptied |
+| `status` | `status`, `text?`, `message?` | `recording`, `transcribing`, `empty_segment`, `transcript_empty`, etc. |
+| `todo_state` | `items[]`, `selectedIndex`, `lastActionText?` | Todo list mirror |
+| `todo_result` | `ok`, `action`, `message` | Todo command result |
+| `force_refresh` | — | Redraw display |
+| `device_event` | `event`, `deviceId`, `boardType` | Multi-client admin |
+| `firmware_check` | `sha256`, `size`, `version?` | OTA version check |
+| `firmware_offer` | `url`, `sha256`, `size`, `version?` | OTA firmware offer |
+| `provision_secret` | `secret`, `hostId`, `hostName` | Pairing secret provisioning |
+| `discover_reply` | `hostId`, `wsUrl`, `wsPort`, `authSig?` | UDP discovery reply |
+
+## Versioning policy
+
+- Unknown `type`: log `unknown_message_type`, ignore.
+- `protocolVersion` mismatch: log warning, best-effort continue.
+- Breaking changes require incrementing `protocolVersion` and updating both firmware and macOS client.
 # LAN WebSocket Protocol v1
 
 > `protocolVersion: 1` — carried in `hello_ack` and `server_ready`.  

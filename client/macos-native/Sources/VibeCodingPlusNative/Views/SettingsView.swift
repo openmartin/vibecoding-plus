@@ -1,6 +1,4 @@
 import SwiftUI
-import EventKit
-// MARK: - Settings
 
 struct SettingsView: View {
     @EnvironmentObject private var state: AppState
@@ -12,14 +10,8 @@ struct SettingsView: View {
             InkPanel(title: "macOS 权限状态", symbol: "checkmark.shield", accent: true) {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 20) {
-                        permIndicator("辅助功能", granted: AccessibilitySupport.isTrusted, needed: state.config.sendTarget == .textInjector)
-                        permIndicator("麦克风", granted: micPermissionGranted(), needed: true)
-                        permIndicator("提醒事项", granted: reminderPermissionGranted(), needed: state.config.remindersSyncEnabled)
+                        permIndicator("麦克风", granted: MicrophonePermission.isGranted, needed: true)
                         Spacer()
-                        Button { state.revealAppInFinder() } label: {
-                            Label("在 Finder 中显示", systemImage: "folder")
-                        }
-                        .inkButton()
                         Button { state.openPermissions() } label: {
                             Label("打开权限", systemImage: "lock.open")
                         }
@@ -29,76 +21,11 @@ struct SettingsView: View {
                         }
                         .inkButton()
                     }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("当前运行的应用")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(InkTheme.ink.opacity(0.5))
-                        Text(AccessibilitySupport.runningAppPath)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                            .lineLimit(2)
-                    }
-
-                    if state.config.sendTarget == .textInjector && !AccessibilitySupport.isTrusted {
-                        Text(AccessibilitySupport.reauthorizeHint)
-                            .font(.caption)
-                            .foregroundStyle(InkTheme.warning)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Text("注入诊断日志：~/Library/Application Support/vibecoding-plus/inject.log")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .textSelection(.enabled)
                 }
             }
 
-            InkPanel(title: "运行模式", symbol: "switch.2", accessory: AnyView(sectionHint("语音识别结果如何发送到电脑"))) {
+            InkPanel(title: "运行模式", symbol: "switch.2", accessory: AnyView(sectionHint("语音识别结果仅用于 TODO 管理"))) {
                 VStack(spacing: 14) {
-                    PickerRow(label: "发送目标", hint: "输入注入=打到光标处，Codex/Claude Code=发给对应 CLI") {
-                        InkSegmentedPicker(
-                            selection: Binding(
-                                get: { state.config.sendTarget },
-                                set: { newValue in
-                                    state.config.sendTarget = newValue
-                                    state.propagateRuntimeInput()
-                                }
-                            ),
-                            options: SendTarget.allCases,
-                            label: { $0.label }
-                        )
-                    }
-
-                    PickerRow(label: "输入时机", hint: "设备确认=在墨水屏上点确认才输入；立即输入=说完立刻注入") {
-                        InkSegmentedPicker(
-                            selection: Binding(
-                                get: { state.config.transcriptDeliveryMode },
-                                set: { newValue in
-                                    state.config.transcriptDeliveryMode = newValue
-                                    state.propagateRuntimeInput()
-                                }
-                            ),
-                            options: ["confirm_on_device", "immediate"],
-                            label: { $0 == "immediate" ? "立即输入" : "设备确认" }
-                        )
-                    }
-
-                    PickerRow(label: "输入动作", hint: "是否在注入文字后自动按回车") {
-                        InkSegmentedPicker(
-                            selection: Binding(
-                                get: { state.config.textInjectionMode },
-                                set: { newValue in
-                                    state.config.textInjectionMode = newValue
-                                    state.propagateRuntimeInput()
-                                }
-                            ),
-                            options: ["type_and_enter", "type_only"],
-                            label: { $0 == "type_only" ? "只输入" : "输入后回车" }
-                        )
-                    }
-
                     PickerRow(label: "语音识别", hint: "选择语音转文字的 provider，下方会显示对应参数") {
                         InkSegmentedPicker(
                             selection: $state.config.sttProvider,
@@ -111,16 +38,32 @@ struct SettingsView: View {
                         SecureField("留空=不鉴权", text: $state.config.lanSharedSecret)
                             .textFieldStyle(.plain)
                     }
-                    InkFormRow("Codex 目录") {
-                        PathField(text: $state.config.codexCwd) { state.chooseDirectory(for: .codexExec) }
-                    }
-                    InkFormRow("Claude 目录") {
-                        PathField(text: $state.config.claudeCwd) { state.chooseDirectory(for: .claudeCode) }
-                    }
                 }
             }
 
             usageGuidePanel
+
+            InkPanel(title: "TickTick 同步", symbol: "arrow.triangle.2.circlepath", accessory: AnyView(sectionHint("同步今日待办：今天到期 + 已过期未完成"))) {
+                VStack(spacing: 12) {
+                    InkFormRow("Token") {
+                        SecureField("tp_...", text: $state.config.ticktickToken)
+                            .textFieldStyle(.plain)
+                    }
+                    HStack(spacing: 10) {
+                        Button { Task { await state.triggerTickTickSync() } } label: {
+                            Label("立即同步", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .inkButton()
+                        .disabled(state.config.ticktickToken.isEmpty)
+
+                        if state.config.ticktickToken.isEmpty {
+                            Text("填入 Token 后保存并重启服务即可自动同步")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
 
             providerSettings
 
@@ -129,8 +72,6 @@ struct SettingsView: View {
                     Toggle("开机启动", isOn: $state.desktopSettings.autoLaunch)
                     Toggle("隐藏启动", isOn: $state.desktopSettings.launchToTray)
                     Toggle("关闭时保留菜单栏运行", isOn: $state.desktopSettings.closeToTray)
-                    Toggle("Codex 跳过 Git 仓库检查", isOn: $state.config.codexSkipGitRepoCheck)
-                    Toggle("Claude 跳过权限确认", isOn: $state.config.claudeDangerouslySkipPermissions)
                 }
                 .toggleStyle(InkCheckboxToggleStyle())
             }
@@ -215,22 +156,18 @@ struct SettingsView: View {
     @ViewBuilder
     private var usageGuidePanel: some View {
         InkPanel(title: "使用说明", symbol: "book.pages",
-                 accessory: AnyView(sectionHint("文本输入模式按键说明"))) {
+                 accessory: AnyView(sectionHint("语音输入后自动解析为待办操作"))) {
             VStack(alignment: .leading, spacing: 10) {
                 UsageKeyRow(symbol: "rectangle.roundedtop.fill", action: "长按 BOOT",
-                            detail: "开始录音，松开后自动识别并输入到光标处")
-                UsageKeyRow(symbol: "arrow.forward.square", action: "继续长按 BOOT",
-                            detail: "在已输入内容后追加新识别的文字")
-                UsageKeyRow(symbol: "corner.downleft", action: "短按 BOOT",
-                            detail: "发送回车（提交当前输入框）")
-                UsageKeyRow(symbol: "xmark.square", action: "连按两次 BOOT",
-                            detail: "清空输入框中已输入的内容")
+                            detail: "开始录音，松开后自动识别并解析为待办指令")
+                UsageKeyRow(symbol: "checkmark.square", action: "短按 BOOT",
+                            detail: "完成或删除当前选中的待办")
                 UsageKeyRow(symbol: "arrow.up.arrow.down", action: "上 / 下 键",
-                            detail: "翻页 / 切换模式（不参与发送）")
+                            detail: "移动待办选择或滚动日志")
 
                 Divider().opacity(0.4).padding(.top, 2)
 
-                Text("仅当发送目标为「文本注入」时适用；识别完成后自动输入，无需在设备上确认。")
+                Text("录音结束后，服务端通过 TodoAssistant 将语音转写解析为 add/toggle/delete 等待办操作。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(nil)

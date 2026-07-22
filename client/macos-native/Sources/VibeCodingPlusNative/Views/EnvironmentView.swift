@@ -1,5 +1,4 @@
 import SwiftUI
-// MARK: - Environment
 
 struct EnvironmentView: View {
     @EnvironmentObject private var state: AppState
@@ -109,9 +108,6 @@ struct EnvironmentRow: View {
                     }
                     if item.id == "macos_permissions" {
                         Button("打开权限") { state.openPermissions() }.inkButton()
-                    }
-                    if item.id == "codex" || item.id == "claude" {
-                        Button("登录/检查") { state.openToolLogin(item.id) }.inkButton()
                     }
                 }
             }

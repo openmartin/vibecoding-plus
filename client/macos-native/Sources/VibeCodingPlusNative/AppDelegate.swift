@@ -7,17 +7,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     weak var appState: AppState?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // .accessory: no Dock icon, no standard app menu bar — the app lives in
-        // the menu-bar status item. LSUIElement=YES in Info.plist enforces this
-        // at launch; setting it here as well makes it robust to runtime changes.
         NSApp.setActivationPolicy(.accessory)
         configureWindows()
         createStatusItem()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        // Keep the app running in the menu bar after the window is closed via
-        // the red traffic-light button. The status item reopens the window.
         false
     }
 
@@ -28,9 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func refreshStatusMenu() {
         let menu = NSMenu()
         let state = (appState?.serviceRunning == true) ? "运行中" : "已停止"
-        let mode = appState?.config.sendTarget.label ?? ""
 
-        menu.addItem(NSMenuItem(title: "VibeCoding Plus · \(state) · \(mode)", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "VibeCoding Plus · \(state)", action: nil, keyEquivalent: ""))
         menu.addItem(.separator())
         addMenuItem(to: menu, title: "显示窗口", action: #selector(showWindow))
 
@@ -39,21 +33,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         addMenuItem(to: menu, title: "重启服务", action: #selector(restartService))
         addMenuItem(to: menu, title: "停止服务", action: #selector(stopService))
 
-        // Mode submenu
-        menu.addItem(.separator())
-        let modeItem = NSMenuItem(title: "模式", action: nil, keyEquivalent: "")
-        let modeMenu = NSMenu()
-        for target in SendTarget.allCases {
-            let item = NSMenuItem(title: target.label, action: #selector(setMode(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = target.rawValue
-            item.state = appState?.config.sendTarget == target ? .on : .off
-            modeMenu.addItem(item)
-        }
-        modeItem.submenu = modeMenu
-        menu.addItem(modeItem)
-
-        // Settings toggles
         menu.addItem(.separator())
         let launchItem = addMenuItem(to: menu, title: "开机启动", action: #selector(toggleAutoLaunch))
         launchItem.state = appState?.desktopSettings.autoLaunch == true ? .on : .off
@@ -69,9 +48,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(.separator())
         addMenuItem(to: menu, title: "退出", action: #selector(quit), keyEquivalent: "q")
 
-        // Store the menu; do NOT assign it to statusItem.menu so that left-click
-        // is delivered to our action (AppKit would otherwise swallow the click
-        // to show the menu). The menu is popped manually on right/Option-click.
         statusMenu = menu
     }
 
@@ -93,16 +69,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 window.toolbarStyle = .unifiedCompact
                 window.isMovableByWindowBackground = true
                 window.minSize = NSSize(width: 980, height: 680)
-                // Keep the window object alive after close so the menu-bar item
-                // can re-show it; SwiftUI otherwise releases it and "显示窗口"
-                // would have nothing to bring back.
                 window.isReleasedWhenClosed = false
                 window.delegate = self
                 if launchToTray {
                     window.orderOut(nil)
                 } else {
-                    // .accessory apps must explicitly activate to focus the
-                    // window at launch, otherwise it opens behind other apps.
                     NSApp.activate(ignoringOtherApps: true)
                     window.makeKeyAndOrderFront(nil)
                     window.orderFrontRegardless()
@@ -115,9 +86,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.image = NSImage(systemSymbolName: "waveform.and.mic", accessibilityDescription: "VibeCoding Plus")
         item.button?.image?.isTemplate = true
-        // No `statusItem.menu` is assigned so that left-click is delivered to
-        // our action instead of being swallowed by the menu. Left-click opens
-        // the window; right-click (or Option-click) shows the status menu.
         if let button = item.button {
             button.target = self
             button.action = #selector(statusItemClicked)
@@ -130,7 +98,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func statusItemClicked() {
         let event = NSApp.currentEvent
         if event?.type == .rightMouseUp || event?.modifierFlags.contains(.option) == true {
-            // Show the menu as a popover anchored to the status item button.
             if let button = statusItem?.button, let menu = statusMenu {
                 menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 4), in: button)
             }
@@ -140,29 +107,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func showWindow() {
-        // .accessory apps need an explicit activate call to come to the front.
         NSApp.activate(ignoringOtherApps: true)
         if let window = NSApp.windows.first(where: { !($0 is NSPanel) }) {
             if window.isMiniaturized { window.deminiaturize(nil) }
             window.setIsVisible(true)
             window.makeKeyAndOrderFront(nil)
             window.orderFrontRegardless()
+        } else if let window = retainedWindow {
+            window.setIsVisible(true)
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
         } else {
-            // The retained window was ordered out (hidden) but may no longer be
-            // in NSApp.windows if SwiftUI pruned it. Re-show any window we own.
-            if let window = retainedWindow {
-                window.setIsVisible(true)
-                window.makeKeyAndOrderFront(nil)
-                window.orderFrontRegardless()
-            } else {
-                NSApp.activate(ignoringOtherApps: true)
-            }
+            NSApp.activate(ignoringOtherApps: true)
         }
     }
 
-    // MARK: - NSWindowDelegate
-
-    /// The window we keep alive for re-showing from the menu-bar item.
     private var retainedWindow: NSWindow?
 
     func windowDidBecomeKey(_ notification: Notification) {
@@ -171,9 +130,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// Intercept the red traffic-light close. For a menu-bar accessory app the
-    /// window must stay around so the status item can reopen it; otherwise
-    /// SwiftUI releases it and "显示窗口" becomes a no-op. Always hide to tray.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         retainedWindow = sender
         sender.orderOut(nil)
@@ -190,16 +146,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func stopService() {
         Task { @MainActor in await appState?.stopService(); refreshStatusMenu() }
-    }
-
-    @objc private func setMode(_ sender: NSMenuItem) {
-        guard let rawValue = sender.representedObject as? String,
-              let target = SendTarget(rawValue: rawValue) else { return }
-        Task { @MainActor in
-            appState?.config.sendTarget = target
-            await appState?.saveSettings()
-            refreshStatusMenu()
-        }
     }
 
     @objc private func toggleAutoLaunch() {

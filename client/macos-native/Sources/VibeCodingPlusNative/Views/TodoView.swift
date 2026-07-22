@@ -6,9 +6,6 @@ struct TodoView: View {
     @State private var title = ""
     @State private var dueDate: Date?
     @State private var isEditingDate = false
-    @State private var reminderListSelection: String = ""
-    @State private var useReminderList = false
-
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             PageHeader(
@@ -16,14 +13,9 @@ struct TodoView: View {
                 title: "待办",
                 subtitle: state.inlineStatus,
                 trailing: {
-                    HStack(spacing: 8) {
-                        if state.syncStatus?.enabled == true {
-                            StatusBadge(text: "同步开启", active: true)
-                        }
-                        Text("\(state.todos.count) 进行中")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("\(state.todos.count) 进行中")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
                 }
             )
 
@@ -47,27 +39,6 @@ struct TodoView: View {
                         .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
 
-                    if state.syncStatus?.enabled == true || !state.reminderLists.isEmpty {
-                        HStack(spacing: 12) {
-                            Toggle("同步到提醒分组", isOn: $useReminderList)
-                                .toggleStyle(InkCheckboxToggleStyle())
-                            if useReminderList {
-                                Picker("提醒分组", selection: $reminderListSelection) {
-                                    Text("使用默认列表").tag("")
-                                    ForEach(state.reminderLists) { list in
-                                        Text("\(list.title) (\(list.reminderCount))").tag(list.title)
-                                    }
-                                }
-                                .pickerStyle(.menu)
-                                .frame(maxWidth: 300)
-                                Button { Task { await state.runReminderSync() } } label: {
-                                    Label("立即同步", systemImage: "arrow.triangle.2.circlepath")
-                                }
-                                .inkButton()
-                            }
-                            Spacer()
-                        }
-                    }
                 }
             }
 
@@ -77,9 +48,6 @@ struct TodoView: View {
                     .frame(maxWidth: 380)
             }
         }
-        .onAppear {
-            Task { await state.fetchSyncLists() }
-        }
     }
 
     private func add() {
@@ -88,8 +56,7 @@ struct TodoView: View {
         let dueISO = dueDate.map { ISO8601DateFormatter().string(from: $0) }
         dueDate = nil
         isEditingDate = false
-        let listForSync = useReminderList ? (reminderListSelection.isEmpty ? nil : reminderListSelection) : nil
-        Task { await state.addTodo(value, dueAt: dueISO, reminderList: listForSync) }
+        Task { await state.addTodo(value, dueAt: dueISO) }
     }
 
     @ViewBuilder
@@ -235,14 +202,10 @@ struct TodoRow: View {
                             .foregroundStyle(item.completed ? .secondary : .primary)
                         HStack(spacing: 8) {
                             if let dueAt = item.dueAt, !dueAt.isEmpty {
-                                Label(formatDueDate(dueAt), systemImage: "calendar")
+                                let info = formatDueDate(dueAt, isAllDay: item.isAllDay, timeZone: item.timeZone)
+                                Label(info.text, systemImage: info.icon)
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if item.appleId != nil {
-                                Label("提醒", systemImage: "bell.fill")
-                                    .font(.caption)
-                                    .foregroundStyle(InkTheme.ink)
+                                    .foregroundStyle(info.overdue ? Color.orange : .secondary)
                             }
                         }
                     }
@@ -285,10 +248,78 @@ struct TodoRow: View {
         Task { await state.editTodo(item, title: trimmed, dueAt: item.dueAt) }
     }
 
-    private func formatDueDate(_ iso: String) -> String {
-        guard let date = ISO8601DateFormatter().date(from: iso) else { return iso }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MM-dd"
-        return formatter.string(from: date)
+    private func formatDueDate(_ iso: String, isAllDay: Bool?, timeZone: String?) -> (text: String, icon: String, overdue: Bool) {
+        // Parse TickTick date format: "2026-07-21T16:00:00.000+0000"
+        guard let date = Self.parseDate(iso) else { return (iso, "calendar", false) }
+
+        // Determine the display timezone (use task's timezone or local)
+        let displayTZ: TimeZone
+        if let tzId = timeZone, let tz = TimeZone(identifier: tzId) {
+            displayTZ = tz
+        } else {
+            displayTZ = .current
+        }
+
+        var calendar = Calendar.current
+        calendar.timeZone = displayTZ
+
+        let now = Date()
+        let todayStart = calendar.startOfDay(for: now)
+        let dueDayStart = calendar.startOfDay(for: date)
+        let dayDiff = calendar.dateComponents([.day], from: todayStart, to: dueDayStart).day ?? 0
+
+        let allDay = isAllDay ?? false
+
+        // Date part: relative day name
+        let dayText: String
+        if dayDiff == 0 {
+            dayText = "今天"
+        } else if dayDiff == 1 {
+            dayText = "明天"
+        } else if dayDiff == -1 {
+            dayText = "昨天"
+        } else if dayDiff < -1 {
+            dayText = "逾期\(-dayDiff)天"
+        } else if dayDiff <= 7 {
+            dayText = "\(dayDiff)天后"
+        } else {
+            let f = DateFormatter()
+            f.timeZone = displayTZ
+            f.dateFormat = "M月d日"
+            dayText = f.string(from: date)
+        }
+
+        // Time part (only for non-all-day tasks)
+        if allDay {
+            let icon = dayDiff < 0 ? "exclamationmark.circle" : "calendar"
+            return (dayText, icon, dayDiff < 0)
+        } else {
+            let tf = DateFormatter()
+            tf.timeZone = displayTZ
+            tf.dateFormat = "HH:mm"
+            let timeText = tf.string(from: date)
+            let icon = dayDiff < 0 ? "exclamationmark.circle" : "clock"
+            return ("\(dayText) \(timeText)", icon, dayDiff < 0)
+        }
+    }
+
+    /// Parse various ISO 8601 date formats from TickTick.
+    private static func parseDate(_ str: String) -> Date? {
+        // TickTick format: "2026-07-21T16:00:00.000+0000"
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        if let d = df.date(from: str) { return d }
+
+        // ISO 8601 with fractional seconds
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = iso.date(from: str) { return d }
+
+        // ISO 8601 without fractional seconds
+        iso.formatOptions = [.withInternetDateTime]
+        if let d = iso.date(from: str) { return d }
+
+        return nil
     }
 }

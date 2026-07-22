@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <ctime>
 #include <cctype>
+#include <cstring>
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -134,12 +135,18 @@ std::string FormatTodoClockText(const tm& local_tm) {
     return FormatTwoDigits(local_tm.tm_hour) + ":" + FormatTwoDigits(local_tm.tm_min);
 }
 
+static const char* kWeekdaysCn[] = {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
+
 std::string FormatTodoDateText(const tm& local_tm) {
-    static const char* kWeekdaysCn[] = {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
     const int wday = (local_tm.tm_wday >= 0 && local_tm.tm_wday <= 6) ? local_tm.tm_wday : 0;
     return FormatTwoDigits(local_tm.tm_mon + 1) + "/" +
            FormatTwoDigits(local_tm.tm_mday) + " " +
            kWeekdaysCn[wday];
+}
+
+std::string FormatTodoWeekdayText(const tm& local_tm) {
+    const int wday = (local_tm.tm_wday >= 0 && local_tm.tm_wday <= 6) ? local_tm.tm_wday : 0;
+    return kWeekdaysCn[wday];
 }
 
 
@@ -241,6 +248,16 @@ bool ParseIsoDateMonthDay(const std::string& due_at, int& out_month, int& out_da
         if (pos + 6 <= due_at.size() && due_at[pos + 3] == ':' &&
             ParseDigits(due_at, pos + 1, 2, tz_hour) &&
             ParseDigits(due_at, pos + 4, 2, tz_minute)) {
+            // Format: +HH:MM
+            has_timezone = true;
+            timezone_offset_seconds = tz_hour * 3600 + tz_minute * 60;
+            if (!positive) {
+                timezone_offset_seconds = -timezone_offset_seconds;
+            }
+        } else if (pos + 5 <= due_at.size() &&
+                   ParseDigits(due_at, pos + 1, 2, tz_hour) &&
+                   ParseDigits(due_at, pos + 3, 2, tz_minute)) {
+            // Format: +HHMM (no colon)
             has_timezone = true;
             timezone_offset_seconds = tz_hour * 3600 + tz_minute * 60;
             if (!positive) {
@@ -271,13 +288,183 @@ bool ParseIsoDateMonthDay(const std::string& due_at, int& out_month, int& out_da
     return true;
 }
 
-std::string FormatTodoRightTimeText(const std::string& due_at) {
+// 解析 ISO 8601 日期时间，返回完整的 tm 结构（本地时间）
+// 成功返回 true 并填充 out_tm；失败返回 false
+bool ParseIsoDateTimeLocal(const std::string& due_at, tm& out_tm) {
+    if (due_at.size() < 10 || due_at[4] != '-' || due_at[7] != '-') {
+        return false;
+    }
+
+    int year = 0;
     int month = 0;
     int day = 0;
-    if (!ParseIsoDateMonthDay(due_at, month, day)) {
+    if (!ParseDigits(due_at, 0, 4, year) ||
+        !ParseDigits(due_at, 5, 2, month) ||
+        !ParseDigits(due_at, 8, 2, day)) {
+        return false;
+    }
+
+    const int max_day = DaysInMonth(year, month);
+    if (max_day == 0 || day < 1 || day > max_day) {
+        return false;
+    }
+
+    int hour = 0;
+    int minute = 0;
+    int second = 0;
+    bool has_time = false;
+
+    if (due_at.size() > 10 && due_at[10] == 'T' && due_at.size() >= 16 && due_at[13] == ':') {
+        if (ParseDigits(due_at, 11, 2, hour) && ParseDigits(due_at, 14, 2, minute)) {
+            has_time = true;
+            size_t pos = 16;
+            if (pos < due_at.size() && due_at[pos] == ':') {
+                if (pos + 3 <= due_at.size() && ParseDigits(due_at, pos + 1, 2, second)) {
+                    pos += 3;
+                }
+            }
+        }
+    }
+
+    // 处理时区偏移，转换为本地时间
+    if (has_time) {
+        size_t pos = 16;
+        // 跳过秒
+        if (pos < due_at.size() && due_at[pos] == ':') {
+            pos += 3;
+        }
+        // 跳过毫秒
+        if (pos < due_at.size() && due_at[pos] == '.') {
+            ++pos;
+            while (pos < due_at.size() && std::isdigit(static_cast<unsigned char>(due_at[pos]))) {
+                ++pos;
+            }
+        }
+
+        bool has_timezone = false;
+        int tz_offset_sec = 0;
+        if (pos < due_at.size() && (due_at[pos] == 'Z' || due_at[pos] == 'z')) {
+            has_timezone = true;
+        } else if (pos < due_at.size() && (due_at[pos] == '+' || due_at[pos] == '-')) {
+            const bool positive = due_at[pos] == '+';
+            int tz_h = 0, tz_m = 0;
+            if (pos + 6 <= due_at.size() && due_at[pos + 3] == ':' &&
+                ParseDigits(due_at, pos + 1, 2, tz_h) &&
+                ParseDigits(due_at, pos + 4, 2, tz_m)) {
+                // Format: +HH:MM
+                has_timezone = true;
+                tz_offset_sec = tz_h * 3600 + tz_m * 60;
+                if (!positive) tz_offset_sec = -tz_offset_sec;
+            } else if (pos + 5 <= due_at.size() &&
+                       ParseDigits(due_at, pos + 1, 2, tz_h) &&
+                       ParseDigits(due_at, pos + 3, 2, tz_m)) {
+                // Format: +HHMM (no colon, e.g. TickTick "2026-07-21T16:00:00.000+0000")
+                has_timezone = true;
+                tz_offset_sec = tz_h * 3600 + tz_m * 60;
+                if (!positive) tz_offset_sec = -tz_offset_sec;
+            }
+        }
+
+        if (has_timezone) {
+            const int64_t epoch =
+                DaysFromCivil(year, static_cast<unsigned>(month), static_cast<unsigned>(day)) * 86400 +
+                static_cast<int64_t>(hour) * 3600 +
+                static_cast<int64_t>(minute) * 60 +
+                static_cast<int64_t>(second) -
+                static_cast<int64_t>(tz_offset_sec);
+            time_t epoch_time = static_cast<time_t>(epoch);
+            if (localtime_r(&epoch_time, &out_tm) == nullptr) {
+                return false;
+            }
+            return true;
+        }
+    }
+
+    // 无时区信息，直接填充
+    memset(&out_tm, 0, sizeof(out_tm));
+    out_tm.tm_year = year - 1900;
+    out_tm.tm_mon = month - 1;
+    out_tm.tm_mday = day;
+    out_tm.tm_hour = hour;
+    out_tm.tm_min = minute;
+    out_tm.tm_sec = second;
+    // 计算 tm_wday
+    time_t t = mktime(&out_tm);
+    if (t != -1) {
+        localtime_r(&t, &out_tm);
+    }
+    return true;
+}
+
+// 人性化右侧时间格式：
+//   今天     -> "HH:MM"
+//   明天     -> "明天 HH:MM"
+//   本周内   -> "周X HH:MM"
+//   今年     -> "MM/DD HH:MM"
+//   其他年份 -> "YYYY/MM/DD"
+//   无时间   -> "MM/DD"
+std::string FormatTodoRightTimeText(const std::string& due_at, const tm* now_tm) {
+    if (due_at.empty()) {
         return "";
     }
-    return FormatTwoDigits(month) + "/" + FormatTwoDigits(day);
+
+    tm due_tm = {};
+    if (!ParseIsoDateTimeLocal(due_at, due_tm)) {
+        return "";
+    }
+
+    const bool has_time = due_at.size() > 10 && due_at[10] == 'T';
+
+    // 无当前时间参考时，退回到简单格式
+    if (now_tm == nullptr) {
+        if (has_time) {
+            return FormatTwoDigits(due_tm.tm_mon + 1) + "/" + FormatTwoDigits(due_tm.tm_mday) + " " +
+                   FormatTwoDigits(due_tm.tm_hour) + ":" + FormatTwoDigits(due_tm.tm_min);
+        }
+        return FormatTwoDigits(due_tm.tm_mon + 1) + "/" + FormatTwoDigits(due_tm.tm_mday);
+    }
+
+    // 计算天数差（忽略时间部分）
+    auto to_days = [](const tm& t) -> int64_t {
+        return DaysFromCivil(t.tm_year + 1900, static_cast<unsigned>(t.tm_mon + 1),
+                             static_cast<unsigned>(t.tm_mday));
+    };
+    const int64_t now_days = to_days(*now_tm);
+    const int64_t due_days = to_days(due_tm);
+    const int64_t diff = due_days - now_days;
+
+    std::string time_part;
+    if (has_time) {
+        time_part = " " + FormatTwoDigits(due_tm.tm_hour) + ":" + FormatTwoDigits(due_tm.tm_min);
+    }
+
+    // 今天
+    if (diff == 0) {
+        return has_time ? (FormatTwoDigits(due_tm.tm_hour) + ":" + FormatTwoDigits(due_tm.tm_min)) : "今天";
+    }
+    // 逾期
+    if (diff < 0) {
+        if (diff == -1) return "昨天" + time_part;
+        return "逾" + std::to_string(-diff) + "天";
+    }
+    // 明天
+    if (diff == 1) {
+        return "明天" + time_part;
+    }
+    // 本周内（2~7天后，且在同一周内）
+    if (diff >= 2 && diff <= 6) {
+        // 判断是否跨周：due 的 wday > now 的 wday 说明仍在同一周
+        if (due_tm.tm_wday > now_tm->tm_wday) {
+            return FormatTodoWeekdayText(due_tm) + time_part;
+        }
+    }
+    // 今年
+    if (due_tm.tm_year == now_tm->tm_year) {
+        return FormatTwoDigits(due_tm.tm_mon + 1) + "/" + FormatTwoDigits(due_tm.tm_mday) + time_part;
+    }
+    // 跨年
+    return std::to_string(due_tm.tm_year + 1900) + "/" +
+           FormatTwoDigits(due_tm.tm_mon + 1) + "/" + FormatTwoDigits(due_tm.tm_mday);
 }
 
 std::vector<std::string> WrapUtf8Lines(const std::string& text, size_t max_chars, size_t max_lines) {

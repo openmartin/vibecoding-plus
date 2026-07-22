@@ -18,22 +18,6 @@ enum ServiceStatus: String {
     }
 }
 
-enum SendTarget: String, CaseIterable, Identifiable {
-    case textInjector = "text_injector"
-    case codexExec = "codex_exec"
-    case claudeCode = "claude_code"
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .textInjector: "输入注入"
-        case .codexExec: "Codex"
-        case .claudeCode: "Claude Code"
-        }
-    }
-}
-
 enum STTProvider: String, CaseIterable, Identifiable {
     case volcengine
     case openai
@@ -80,7 +64,6 @@ struct EnvironmentReport {
     var ok: Bool
     var path: String
     var provider: String
-    var sendTarget: SendTarget
     var checks: [EnvironmentCheck]
 }
 
@@ -91,10 +74,7 @@ struct DesktopSettings: Codable {
 }
 
 struct AppConfig {
-    var sendTarget: SendTarget = .textInjector
     var sttProvider: STTProvider = .volcengine
-    var transcriptDeliveryMode: String = "confirm_on_device"
-    var textInjectionMode: String = "type_and_enter"
     var openaiApiKey: String = ""
     var openaiModel: String = "whisper-1"
     var openaiBaseUrl: String = ""
@@ -115,31 +95,20 @@ struct AppConfig {
     var deepSeekApiKey: String = ""
     var deepSeekModel: String = "deepseek-chat"
     var deepSeekBaseUrl: String = "https://api.deepseek.com"
-    var claudeCommand: String = "claude"
-    var codexCommand: String = "codex"
-    var claudeMaxTurns: Int = 10
-    var mockTranscript: String = ""
-    var codexCwd: String = ""
-    var claudeCwd: String = ""
-    var codexSkipGitRepoCheck: Bool = false
-    var claudeDangerouslySkipPermissions: Bool = false
     var port: Int = 8765
     var setupPort: Int = 8768
     var discoveryHostId: String = "VibeServer"
     var discoveryPort: Int = 8766
-    var remindersSyncEnabled: Bool = false
-    var remindersListName: String = ""
-    var remindersPollSec: Int = 15
     var displayTodoRefreshMs: Int = 2000
-    var displayCodingRefreshMs: Int = 2000
     var displayStyle: String = "light"
+    var mockTranscript: String = ""
+    var ticktickToken: String = ""
 }
 
 struct DeviceInfo: Identifiable, Decodable {
     var connId: String?
     var deviceId: String
     var boardType: String?
-    var voiceMode: String?
     var remoteAddress: String?
     var connectedAt: Double?
     var isProvisioned: Bool = false
@@ -159,7 +128,9 @@ struct TodoItem: Identifiable, Decodable {
     var title: String
     var completed: Bool
     var dueAt: String?
-    var appleId: String?
+    var ticktickId: String?
+    var isAllDay: Bool?
+    var timeZone: String?
 }
 
 struct ServiceStatusPayload: Decodable {
@@ -167,59 +138,18 @@ struct ServiceStatusPayload: Decodable {
     var uptime: Double?
     var clientCount: Int?
     var sttProvider: String?
-    var sendTarget: String?
     var discoveryEnabled: Bool?
     var port: Int?
 }
 
-struct ReminderSyncStatus: Decodable {
-    var enabled: Bool?
-    var lastSyncAt: Double?
-    var syncCount: Int?
-    var lastError: String?
-    var remindctlPath: String?
-    var list: String?
-    var pollSec: Int?
-}
-
-struct ReminderListInfo: Identifiable, Decodable {
-    var id: String
-    var title: String
-    var reminderCount: Int
-    var overdueCount: Int
-}
-
 struct DisplayConfig {
     var todoRefreshMs: Int = 2000
-    var codingRefreshMs: Int = 2000
     var style: String = "light"
 }
 
 struct LiveActivity {
     var lastTranscript: String = ""
-    var lastUserText: String = ""
-    var lastAssistantText: String = ""
-    var cliStatus: String = ""
-    var cliLogLines: [String] = []
     var serviceLogLines: [String] = []
-}
-
-enum LogFilter: String, CaseIterable, Identifiable {
-    case all
-    case transcript
-    case user
-    case assistant
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .all: "全部"
-        case .transcript: "语音识别"
-        case .user: "用户"
-        case .assistant: "AI"
-        }
-    }
 }
 
 enum ServiceLogFilter: String, CaseIterable, Identifiable {

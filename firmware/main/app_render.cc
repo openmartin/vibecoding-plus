@@ -74,18 +74,8 @@ const char* LanMicApp::GetNetworkLabel() const {
     }
 }
 
-const char* LanMicApp::GetToolLabel() const {
-    if (send_target_ == "claude_code") {
-        return "Claude";
-    }
-    if (send_target_ == "text_injector") {
-        return "Inject";
-    }
-    return "Codex";
-}
-
 const char* LanMicApp::GetModeLabel() const {
-    return (active_page_ == Page::Todo || offline_todo_mode_) ? "模式: 待办" : "模式: 编程";
+    return "待办";
 }
 
 std::string LanMicApp::GetPhaseLabel() const {
@@ -94,10 +84,6 @@ std::string LanMicApp::GetPhaseLabel() const {
             return "● 录音";
         case Phase::Transcribing:
             return "... 转写";
-        case Phase::AwaitingAction:
-            return "? 发送?";
-        case Phase::Running:
-            return "▶ AI处理中";
         case Phase::Upgrading:
             return "↑ 升级中";
         case Phase::Error:
@@ -111,7 +97,6 @@ std::string LanMicApp::GetPhaseLabel() const {
 bool LanMicApp::ShouldShowIdleTodoPage() const {
     return offline_todo_mode_ &&
            phase_ == Phase::Idle &&
-           !has_pending_transcript_ &&
            active_page_ != Page::Log &&
            active_page_ != Page::Settings &&
            !todo_menu_open_;
@@ -124,9 +109,6 @@ void LanMicApp::ShowIdleTodoPage() {
 }
 
 std::string LanMicApp::GetFooterText() const {
-    if (has_pending_transcript_) {
-        return "BOOT追加 | ↑发送 | ↓撤销";
-    }
     if (phase_ == Phase::Recording) {
         return "松开 BOOT 停止";
     }
@@ -140,79 +122,12 @@ std::string LanMicApp::GetFooterText() const {
         return settings_editing_volume_ ? "↑/↓ ±10 | BOOT 保存"
                                         : "↑/↓ 导航 | BOOT 确认 | 长按↑返回";
     }
-    if (active_page_ == Page::Summary) {
-        if (!plan_options_.empty()) {
-            return "↑/↓ 选方案 | BOOT 应用";
-        }
-        return "长按↑菜单 | 长按输入/短按回车";
-    }
     if (active_page_ == Page::Todo) {
         return IsServerConnected()
             ? "长按↑菜单 | 长按添加/短按完成"
             : "长按↑菜单 | ↑/↓ 选择";
     }
     return "↑/↓ 滚动 | 长按↑ | 长按↓设置";
-}
-
-std::string LanMicApp::BuildPromptBody() const {
-    if (!plan_options_.empty()) {
-        std::vector<std::string> rows;
-        const int count = static_cast<int>(plan_options_.size());
-        const int current = plan_selected_index_ < 0 ? 0 : std::clamp(plan_selected_index_, 0, count - 1);
-        const int start = std::clamp(current - 1, 0, std::max(0, count - static_cast<int>(kPromptVisibleLines)));
-        const int end = std::min(count, start + static_cast<int>(kPromptVisibleLines));
-        for (int index = start; index < end; ++index) {
-            std::string row = (index == current) ? "> " : "  ";
-            row += std::to_string(index + 1);
-            row += ". ";
-            row += plan_options_[index];
-            rows.push_back(row);
-        }
-        std::string body;
-        for (size_t i = 0; i < rows.size(); ++i) {
-            if (i > 0) {
-                body += "\n";
-            }
-            body += rows[i];
-        }
-        return body;
-    }
-    if (!transcript_text_.empty()) {
-        return transcript_text_;
-    }
-    if (!hint_text_.empty()) {
-        return hint_text_;
-    }
-    if (offline_todo_mode_) {
-        return "离线待办缓存";
-    }
-    // Default hint based on connection state
-    switch (network_state_) {
-        case NetworkState::Server:
-            return active_page_ == Page::Todo
-                ? "待办语音模式\n长按↑打开菜单"
-                : "编程模式\n长按↑打开菜单";
-        case NetworkState::Wifi:
-            return "正在查找服务器...";
-        case NetworkState::Config:
-            return "打开 192.168.4.1";
-        case NetworkState::Offline:
-        default:
-            return "连接 Wi‑Fi 中...";
-    }
-}
-
-std::string LanMicApp::BuildReplyBody() const {
-    if (!plan_options_.empty()) {
-        return "按 BOOT 应用当前方案";
-    }
-    if (!latest_assistant_text_.empty()) {
-        return latest_assistant_text_;
-    }
-    if (!cli_status_text_.empty()) {
-        return cli_status_text_;
-    }
-    return "CLI 暂无回复";
 }
 
 std::vector<std::string> LanMicApp::WrapText(const std::string& text, size_t max_chars) const {
@@ -243,8 +158,7 @@ void LanMicApp::UpdateLed() {
             ZectrixSetFactoryLedOverride(true, false);  // keep LED off; error is shown on e-paper
             break;
         case Phase::Transcribing:
-        case Phase::Running:
-        case Phase::AwaitingAction:
+        case Phase::Upgrading:
             ZectrixSetFactoryLedOverride(true, false);  // keep LED off; status is shown on e-paper
             break;
         case Phase::Idle:
@@ -320,8 +234,8 @@ void LanMicApp::DrawTodoHeaderIcon(int x, int y) {
     if (display_ == nullptr) {
         return;
     }
-    constexpr int w = 16;
-    constexpr int h = 16;
+    constexpr int w = 24;
+    constexpr int h = 28;
     constexpr int bytes_per_row = (w + 7) / 8;
     std::vector<uint8_t> buffer(bytes_per_row * h, 0x00);
 
@@ -333,24 +247,27 @@ void LanMicApp::DrawTodoHeaderIcon(int x, int y) {
         buffer[bit_index >> 3] |= static_cast<uint8_t>(1U << (7 - (bit_index & 7)));
     };
 
-    for (int px = 2; px <= 13; ++px) {
-        set_pixel(px, 2);
-        set_pixel(px, 13);
+    // 主体外框
+    for (int px = 3; px <= 20; ++px) {
+        set_pixel(px, 3);
+        set_pixel(px, 26);
     }
-    for (int py = 3; py <= 12; ++py) {
-        set_pixel(2, py);
-        set_pixel(13, py);
+    for (int py = 4; py <= 25; ++py) {
+        set_pixel(3, py);
+        set_pixel(20, py);
     }
-    for (int px = 5; px <= 10; ++px) {
-        set_pixel(px, 1);
-    }
-    set_pixel(5, 2);
-    set_pixel(10, 2);
 
-    for (int py = 5; py <= 10; py += 2) {
-        set_pixel(5, py);
-        set_pixel(6, py);
-        for (int px = 8; px <= 11; ++px) {
+    // 顶部夹子
+    for (int px = 8; px <= 15; ++px) {
+        set_pixel(px, 1);
+        set_pixel(px, 2);
+    }
+    set_pixel(8, 3);
+    set_pixel(15, 3);
+
+    // 内部横线（模拟列表行）
+    for (int py = 8; py <= 22; py += 3) {
+        for (int px = 7; px <= 16; ++px) {
             set_pixel(px, py);
         }
     }
@@ -397,6 +314,199 @@ void LanMicApp::DrawBatteryIcon(int x, int y, int level, bool charging) {
     display_->WriteRaw1bpp(x, y, 14, 8, buffer.data(), buffer.size());
 }
 
+// =======================================================
+// 大号数字时钟：3x5 像素字体，可缩放
+// =======================================================
+
+// 3x5 像素数字字模（0-9），每数字 15 bit，按行存储
+static const uint8_t kDigitFont3x5[10][5] = {
+    {0b111, 0b101, 0b101, 0b101, 0b111},  // 0
+    {0b010, 0b110, 0b010, 0b010, 0b111},  // 1
+    {0b111, 0b001, 0b111, 0b100, 0b111},  // 2
+    {0b111, 0b001, 0b111, 0b001, 0b111},  // 3
+    {0b101, 0b101, 0b111, 0b001, 0b001},  // 4
+    {0b111, 0b100, 0b111, 0b001, 0b111},  // 5
+    {0b111, 0b100, 0b111, 0b101, 0b111},  // 6
+    {0b111, 0b001, 0b010, 0b010, 0b010},  // 7
+    {0b111, 0b101, 0b111, 0b101, 0b111},  // 8
+    {0b111, 0b101, 0b111, 0b001, 0b111},  // 9
+};
+
+void LanMicApp::DrawBigDigit(int x, int y, int digit, int scale) {
+    if (display_ == nullptr || digit < 0 || digit > 9 || scale <= 0) {
+        return;
+    }
+    const int w = 3 * scale;
+    const int h = 5 * scale;
+    const int bytes_per_row = (w + 7) / 8;
+    std::vector<uint8_t> buf(bytes_per_row * h, 0x00);
+
+    for (int row = 0; row < 5; ++row) {
+        const uint8_t bits = kDigitFont3x5[digit][row];
+        for (int col = 0; col < 3; ++col) {
+            if (!((bits >> (2 - col)) & 1)) continue;
+            // 填充 scale x scale 的块
+            for (int sy = 0; sy < scale; ++sy) {
+                for (int sx = 0; sx < scale; ++sx) {
+                    const int px = col * scale + sx;
+                    const int py = row * scale + sy;
+                    const int bit_index = py * w + px;
+                    buf[bit_index >> 3] |= static_cast<uint8_t>(1U << (7 - (bit_index & 7)));
+                }
+            }
+        }
+    }
+    display_->WriteRaw1bpp(x, y, w, h, buf.data(), buf.size());
+}
+
+void LanMicApp::DrawBigColon(int x, int y, int scale) {
+    if (display_ == nullptr || scale <= 0) {
+        return;
+    }
+    const int w = scale;
+    const int h = 5 * scale;
+    const int bytes_per_row = (w + 7) / 8;
+    std::vector<uint8_t> buf(bytes_per_row * h, 0x00);
+
+    // 两个点：第1行和第3行
+    for (int sy = 0; sy < scale; ++sy) {
+        for (int sx = 0; sx < scale; ++sx) {
+            // 上点 (row=1)
+            {
+                const int px = sx;
+                const int py = 1 * scale + sy;
+                const int bit_index = py * w + px;
+                buf[bit_index >> 3] |= static_cast<uint8_t>(1U << (7 - (bit_index & 7)));
+            }
+            // 下点 (row=3)
+            {
+                const int px = sx;
+                const int py = 3 * scale + sy;
+                const int bit_index = py * w + px;
+                buf[bit_index >> 3] |= static_cast<uint8_t>(1U << (7 - (bit_index & 7)));
+            }
+        }
+    }
+    display_->WriteRaw1bpp(x, y, w, h, buf.data(), buf.size());
+}
+
+void LanMicApp::DrawBigClock(int x, int y, int hour, int minute) {
+    if (display_ == nullptr) {
+        return;
+    }
+    constexpr int scale = 8;   // 每个像素放大8倍 → 数字 24x40 px
+    constexpr int digit_w = 3 * scale;  // 24
+    constexpr int colon_w = scale;      // 8
+    constexpr int spacing = 2;          // 字符间距
+
+    const int h_tens = hour / 10;
+    const int h_ones = hour % 10;
+    const int m_tens = minute / 10;
+    const int m_ones = minute % 10;
+
+    int cx = x;
+    DrawBigDigit(cx, y, h_tens, scale);
+    cx += digit_w + spacing;
+    DrawBigDigit(cx, y, h_ones, scale);
+    cx += digit_w + spacing;
+    DrawBigColon(cx, y, scale);
+    cx += colon_w + spacing;
+    DrawBigDigit(cx, y, m_tens, scale);
+    cx += digit_w + spacing;
+    DrawBigDigit(cx, y, m_ones, scale);
+}
+
+void LanMicApp::DrawCheckbox(int x, int y, bool checked, bool inverted) {
+    if (display_ == nullptr) {
+        return;
+    }
+    constexpr int w = 16;
+    constexpr int h = 16;
+    constexpr int bytes_per_row = (w + 7) / 8;
+    std::vector<uint8_t> buf(bytes_per_row * h, 0x00);
+
+    auto set_pixel = [&](int px, int py) {
+        if (px < 0 || px >= w || py < 0 || py >= h) return;
+        const int bit_index = py * w + px;
+        buf[bit_index >> 3] |= static_cast<uint8_t>(1U << (7 - (bit_index & 7)));
+    };
+
+    // 外框 (1px 宽，更清晰)
+    for (int px = 0; px < w; ++px) {
+        set_pixel(px, 0);
+        set_pixel(px, h - 1);
+    }
+    for (int py = 0; py < h; ++py) {
+        set_pixel(0, py);
+        set_pixel(w - 1, py);
+    }
+
+    if (checked) {
+        // 绘制对勾✔图案（更直观的完成标记）
+        // 对勾路径：左中 → 底部中心 → 右上
+        const int cx = w / 2;  // 8
+        const int cy = h / 2;  // 8
+        // 左半段：从(3, cy)到(cx, h-4)
+        for (int i = 0; i <= cx - 3; ++i) {
+            const int px = 3 + i;
+            const int py = cy - 1 + i * (cy - 3) / (cx - 3);
+            set_pixel(px, py);
+            set_pixel(px, py + 1);  // 加粗
+        }
+        // 右半段：从(cx, h-4)到(w-3, 3)
+        for (int i = 0; i <= (w - 3) - cx; ++i) {
+            const int px = cx + i;
+            const int py = (h - 4) - i * (h - 7) / ((w - 3) - cx);
+            set_pixel(px, py);
+            set_pixel(px, py + 1);  // 加粗
+        }
+    }
+
+    // 对于黑底白字的选中行，需要绘制白色复选框。
+    // WriteRaw1bpp 输入格式：bit=1 表示黑色，bit=0 表示白色。
+    // 选中行使用负片：整个区域 bit=1（黑色背景），复选框线条 bit=0（白色线条）。
+    if (inverted) {
+        // 先填充整个区域为黑色（bit=1）
+        for (auto& byte : buf) {
+            byte = 0xFF;
+        }
+        // 然后清除复选框线条的 bit（设为白色 bit=0）
+        auto clear_pixel = [&](int px, int py) {
+            if (px < 0 || px >= w || py < 0 || py >= h) return;
+            const int bit_index = py * w + px;
+            buf[bit_index >> 3] &= static_cast<uint8_t>(~(1U << (7 - (bit_index & 7))));
+        };
+        // 外框 (1px) - 白色线条
+        for (int px = 0; px < w; ++px) {
+            clear_pixel(px, 0);
+            clear_pixel(px, h - 1);
+        }
+        for (int py = 0; py < h; ++py) {
+            clear_pixel(0, py);
+            clear_pixel(w - 1, py);
+        }
+        if (checked) {
+            // 对勾图案 - 白色
+            const int cx = w / 2;
+            const int cy = h / 2;
+            for (int i = 0; i <= cx - 3; ++i) {
+                const int px = 3 + i;
+                const int py = cy - 1 + i * (cy - 3) / (cx - 3);
+                clear_pixel(px, py);
+                clear_pixel(px, py + 1);
+            }
+            for (int i = 0; i <= (w - 3) - cx; ++i) {
+                const int px = cx + i;
+                const int py = (h - 4) - i * (h - 7) / ((w - 3) - cx);
+                clear_pixel(px, py);
+                clear_pixel(px, py + 1);
+            }
+        }
+    }
+
+    display_->WriteRaw1bpp(x, y, w, h, buf.data(), buf.size());
+}
+
 void LanMicApp::UpdateDisplay() {
     UpdateLed();
 
@@ -404,12 +514,10 @@ void LanMicApp::UpdateDisplay() {
         return;
     }
 
-    const int interval = active_page_ == Page::Todo ? display_todo_refresh_ms_ : display_coding_refresh_ms_;
-    display_->SetSampleIntervalMs(interval);
+    display_->SetSampleIntervalMs(display_todo_refresh_ms_);
     display_->SetInverted(display_dark_style_);
 
     const Page render_page = active_page_;
-    const bool render_offline_todo_mode = offline_todo_mode_;
 
     std::vector<Display::TextItem> texts;
     auto single_line = [](const std::string& value, size_t max_chars) -> std::string {
@@ -417,92 +525,21 @@ void LanMicApp::UpdateDisplay() {
         return lines.empty() ? std::string() : lines.front();
     };
 
-    std::string battery_text = "--";
-    if (battery_known_) {
-        battery_text = std::to_string(std::clamp(battery_level_, 0, 100));
-        if (battery_charging_) {
-            battery_text += "+";
-        }
-    }
-
-    std::string quota_status_text;
-    if (quota_5h_remaining_pct_ >= 0 || quota_week_remaining_pct_ >= 0) {
-        const std::string q5 = quota_5h_remaining_pct_ >= 0 ? std::to_string(std::clamp(quota_5h_remaining_pct_, 0, 100)) : "--";
-        const std::string qw = quota_week_remaining_pct_ >= 0 ? std::to_string(std::clamp(quota_week_remaining_pct_, 0, 100)) : "--";
-        quota_status_text = "5H:" + q5 + " 7d:" + qw;
-    }
-
-    texts.push_back({GetNetworkLabel(), 28, 9, 16});
-    texts.push_back({(render_page == Page::Todo || render_offline_todo_mode) ? "待办" : "编程", 96, 9, 16});
-    texts.push_back({GetPhaseLabel(), 166, 9, 16});
-    if (!quota_status_text.empty()) {
-        texts.push_back({quota_status_text, 250, 9, 16});
-    }
-    texts.push_back({battery_text, 346, 9, 16});
-    const char* page_label = render_page == Page::Summary ? "编程"
-                           : render_page == Page::Todo    ? "待办"
-                           : render_page == Page::Log     ? "日志"
-                           :                               "设置";
-    if (render_page != Page::Todo) {
-        const std::string header_label = repo_name_.empty() ? std::string(GetToolLabel()) : repo_name_;
-        texts.push_back({single_line(header_label, 18), 12, kContentHeaderY, 16});
-        texts.push_back({page_label, 316, kContentHeaderY, 16});
-    }
-
-    if (render_page == Page::Summary) {
-        if (todo_menu_open_ && todo_menu_kind_ == TodoMenuKind::Live) {
-            texts.push_back({"编程菜单", 12, kPromptTitleY, 16});
-            texts.push_back({single_line(GetModeLabel(), 16), 228, kPromptTitleY, 16});
-            std::vector<std::string> rows;
-            const int count = GetTodoMenuItemCount();
-            for (int index = 0; index < count; ++index) {
-                std::string row = (index == todo_menu_selected_item_) ? "> " : "  ";
-                row += GetTodoMenuItemLabel(index);
-                rows.push_back(single_line(row, kBodyCharsPerLine));
-            }
-            int y = kPromptBodyY;
-            for (const auto& row : rows) {
-                texts.push_back({row, 12, y, 16});
-                y += kLineHeight;
-            }
-        } else {
-            // Derive a readable status: phase takes priority, else connection state
-            std::string status_display;
-            if (phase_ == Phase::Recording || phase_ == Phase::Transcribing ||
-                phase_ == Phase::AwaitingAction || phase_ == Phase::Running || phase_ == Phase::Error) {
-                status_display = status_text_;
-            } else if (network_state_ != NetworkState::Server) {
-                status_display = GetNetworkLabel();
-            } else {
-                status_display = GetModeLabel();
-            }
-            texts.push_back({"输入", 12, kPromptTitleY, 16});
-            texts.push_back({single_line(status_display, 16), 228, kPromptTitleY, 16});
-
-            const auto prompt_lines = SliceLines(WrapText(BuildPromptBody(), kBodyCharsPerLine), 0, kPromptVisibleLines);
-            int y = kPromptBodyY;
-            for (const auto& line : prompt_lines) {
-                texts.push_back({line, 12, y, 16});
-                y += kLineHeight;
-            }
-
-            texts.push_back({"回复", 12, kReplyTitleY, 16});
-            texts.push_back({single_line(cli_status_text_.empty() ? std::string(GetToolLabel()) + " 空闲" : cli_status_text_, 16), 228, kReplyTitleY, 16});
-
-            const auto reply_lines = WrapText(BuildReplyBody(), kBodyCharsPerLine);
-            const int summary_offset = std::clamp(
-                summary_scroll_offset_,
-                0,
-                std::max(0, static_cast<int>(reply_lines.size()) - static_cast<int>(kReplyVisibleLines)));
-            const auto assistant_lines = SliceLines(reply_lines, summary_offset, kReplyVisibleLines);
-            y = kReplyBodyY;
-            for (const auto& line : assistant_lines) {
-                texts.push_back({line, 12, y, 16});
-                y += kLineHeight;
-            }
-        }
-    } else if (render_page == Page::Todo) {
+    if (render_page == Page::Todo) {
         if (todo_menu_open_) {
+            // 菜单模式保持原有布局
+            std::string battery_text = "--";
+            if (battery_known_) {
+                battery_text = std::to_string(std::clamp(battery_level_, 0, 100));
+                if (battery_charging_) {
+                    battery_text += "+";
+                }
+            }
+            texts.push_back({GetNetworkLabel(), 28, 9, 16});
+            texts.push_back({"待办", 96, 9, 16});
+            texts.push_back({GetPhaseLabel(), 166, 9, 16});
+            texts.push_back({battery_text, 346, 9, 16});
+
             texts.push_back({"待办菜单", 12, kLogTitleY, 16});
             std::string todo_status = todo_last_action_text_.empty() ? GetModeLabel() : todo_last_action_text_;
             if (!pending_todo_ops_.empty()) {
@@ -532,30 +569,65 @@ void LanMicApp::UpdateDisplay() {
                 texts.push_back({line, 12, y, 16});
                 y += kLineHeight;
             }
-        } else {
-            constexpr int kTodoHeaderBottomY = 95;
-            constexpr int kTodoRowStartY = 100;
-            constexpr int kTodoRowHeight = 26;
-            constexpr int kTodoCheckboxX = 14;
-            constexpr int kTodoTimeX = 286;
-            constexpr int kTodoRowsVisible = 6;
 
+            texts.push_back({GetFooterText(), 12, kFooterTextY, 16});
+            display_->DrawTexts(texts, true);
+            DrawHorizontalLine(kStatusBarBottomY);
+            DrawHorizontalLine(kHeaderLineY);
+            DrawHorizontalLine(kFooterTopY);
+            DrawWifiIcon(10, 8);
+            DrawBatteryIcon(382, 12, battery_known_ ? battery_level_ : 0, battery_charging_);
+        } else {
+            // ===== 目标图片风格布局 =====
+            // Header: 大时钟(位图) + 日期 + WiFi/电池图标
+            // 列表: 5行待办，复选框(位图)+标题+右侧时间
+            // 底部: 分页指示器
+
+            constexpr int kTodoHeaderBottomY = 68;
+            constexpr int kTodoRowStartY = 78;
+            constexpr int kTodoRowHeight = 40;
+            constexpr int kTodoCheckboxX = 14;
+            constexpr int kTodoTitleX = 40;
+            constexpr int kTodoTimeX = 230;
+            constexpr int kTodoRowsVisible = 5;
+            constexpr int kTodoTitleMaxChars = 10;
+
+            // 获取时间：优先 RTC，若 RTC 数据无效则回退到系统时间（SNTP 同步后正确）
             tm todo_tm = {};
             bool has_time = false;
             RtcPcf8563* rtc = ZectrixGetRtc();
             if (rtc != nullptr) {
                 has_time = rtc->GetTime(todo_tm);
             }
+            // RTC 年份不在 2020~2099 范围视为无效，回退到系统时间
+            if (!has_time || todo_tm.tm_year < 120 || todo_tm.tm_year > 199) {
+                time_t now = time(nullptr);
+                if (now > 1577836800) {  // 2020-01-01 00:00:00 UTC
+                    localtime_r(&now, &todo_tm);
+                    has_time = true;
+                } else {
+                    has_time = false;
+                }
+            }
 
-            DrawTodoHeaderIcon(12, 43);
-            texts.push_back({has_time ? FormatTodoClockText(todo_tm) : "--:--", 38, 42, 24});
-            texts.push_back({has_time ? FormatTodoDateText(todo_tm) : "--/-- --", 254, 45, 16});
-            DrawHorizontalLine(kTodoHeaderBottomY, 1);
+            // ---- 第1步：收集所有文本项 ----
+            // Header 右侧: 日期 + 星期 (右对齐，位于 WiFi/电池图标下方)
+            {
+                std::string date_text = has_time ? FormatTodoDateText(todo_tm) : "--/-- --";
+                int text_width = 0;
+                for (size_t i = 0; i < date_text.size(); ) {
+                    unsigned char ch = static_cast<unsigned char>(date_text[i]);
+                    if ((ch & 0xE0) == 0xC0) { text_width += 8; i += 2; }
+                    else if ((ch & 0xF0) == 0xE0) { text_width += 16; i += 3; }
+                    else if ((ch & 0xF8) == 0xF0) { text_width += 16; i += 4; }
+                    else { text_width += 8; i += 1; }
+                }
+                texts.push_back({date_text, 388 - text_width, 44, 16});
+            }
 
             if (todo_items_.empty()) {
-                texts.push_back({"□ 暂无待办", 12, 118, 16});
-                texts.push_back({IsServerConnected() ? "长按↑打开菜单" : "离线缓存为空", 12, 138, 16});
-                texts.push_back({GetModeLabel(), 12, 158, 16});
+                texts.push_back({"暂无待办", 14, 90, 24});
+                texts.push_back({IsServerConnected() ? "长按\u2193打开菜单" : "离线缓存为空", 14, 130, 16});
             } else {
                 const int max_start = std::max(0, static_cast<int>(todo_items_.size()) - kTodoRowsVisible);
                 const int start_index = std::clamp(
@@ -571,32 +643,90 @@ void LanMicApp::UpdateDisplay() {
                     const auto& item = todo_items_[index];
                     const int row_y = kTodoRowStartY + (row_slot * kTodoRowHeight);
                     const bool selected = index == todo_selected_index_;
-                    const std::string checkbox = item.completed ? "■" : "□";
-                    std::string left = checkbox + " ";
-                    if (selected) {
-                        left += ">";
-                    }
-                    left += single_line(item.title, 16);
-                    texts.push_back({left, kTodoCheckboxX, row_y, 16});
 
-                    std::string right_text = FormatTodoRightTimeText(item.due_at);
-                    texts.push_back({right_text, kTodoTimeX, row_y, 16});
-                    DrawTodoDashLine(row_y + 20, 12, 372);
+                    std::string title = single_line(item.title, selected ? kTodoTitleMaxChars - 1 : kTodoTitleMaxChars);
+                    texts.push_back({title, kTodoTitleX, row_y, 24, selected});
+
+                    // 右侧时间（人性化格式）
+                    const tm* now_ptr = has_time ? &todo_tm : nullptr;
+                    std::string right_text = FormatTodoRightTimeText(item.due_at, now_ptr);
+                    texts.push_back({right_text, kTodoTimeX, row_y, 16, selected});
+                }
+
+                // 分页指示器（右下角）
+                const int total_pages = (static_cast<int>(todo_items_.size()) + kTodoRowsVisible - 1) / kTodoRowsVisible;
+                const int current_page = start_index / kTodoRowsVisible + 1;
+                texts.push_back({std::to_string(current_page) + "-" + std::to_string(total_pages), 350, 280, 16});
+            }
+
+            // ---- 第2步：绘制文本（清空帧缓冲） ----
+            display_->DrawTexts(texts, true);
+
+            // ---- 第3步：绘制位图元素（在 DrawTexts 之后，避免被清空） ----
+            // Header: 待办图标(24x28) + 大号时钟
+            DrawTodoHeaderIcon(12, 10);
+            if (has_time) {
+                DrawBigClock(44, 8, todo_tm.tm_hour, todo_tm.tm_min);
+            } else {
+                DrawBigClock(44, 8, 0, 0);
+            }
+
+            // Header 右上角: 电池 + WiFi 图标（紧贴屏幕右边缘）
+            DrawBatteryIcon(384, 10, battery_known_ ? battery_level_ : 0, battery_charging_);
+            DrawWifiIcon(366, 8);
+
+            // Header 底部分隔线（粗线）
+            DrawHorizontalLine(kTodoHeaderBottomY, 2);
+
+            // 待办列表：复选框位图 + 行间分隔线
+            if (!todo_items_.empty()) {
+                const int max_start = std::max(0, static_cast<int>(todo_items_.size()) - kTodoRowsVisible);
+                const int start_index = std::clamp(
+                    todo_selected_index_ < 0 ? 0 : todo_selected_index_ - (kTodoRowsVisible / 2),
+                    0,
+                    max_start);
+                const int end_index = std::min(
+                    static_cast<int>(todo_items_.size()),
+                    start_index + kTodoRowsVisible);
+
+                int row_slot = 0;
+                for (int index = start_index; index < end_index; ++index, ++row_slot) {
+                    const auto& item = todo_items_[index];
+                    const int row_y = kTodoRowStartY + (row_slot * kTodoRowHeight);
+                    const bool selected = index == todo_selected_index_;
+
+                    // 复选框位图（垂直居中对齐24号文字，16px checkbox）
+                    // inverted 需同时考虑全局暗色模式和行选中状态
+                    const bool checkbox_inverted = display_dark_style_ != selected;
+                    DrawCheckbox(kTodoCheckboxX, row_y + 4, item.completed, checkbox_inverted);
+
+                    // 行间分隔线（每行下方都绘制，包括第5行）
+                    DrawHorizontalLine(row_y + kTodoRowHeight - 4, 1);
                 }
             }
         }
     } else if (render_page == Page::Log) {
+        // 非 Todo 页面保持原有布局
+        std::string battery_text = "--";
+        if (battery_known_) {
+            battery_text = std::to_string(std::clamp(battery_level_, 0, 100));
+            if (battery_charging_) {
+                battery_text += "+";
+            }
+        }
+        texts.push_back({GetNetworkLabel(), 28, 9, 16});
+        texts.push_back({"待办", 96, 9, 16});
+        texts.push_back({GetPhaseLabel(), 166, 9, 16});
+        texts.push_back({battery_text, 346, 9, 16});
+
+        const char* page_label = "日志";
+        texts.push_back({single_line(page_label, 18), 12, kContentHeaderY, 16});
+        texts.push_back({page_label, 316, kContentHeaderY, 16});
+
         texts.push_back({"日志", 12, kLogTitleY, 16});
-        texts.push_back({single_line(cli_status_text_.empty() ? std::string(GetToolLabel()) + " 空闲" : cli_status_text_, 16), 228, kLogTitleY, 16});
 
         std::vector<std::string> wrapped;
-        for (const auto& item : cli_log_lines_) {
-            const auto lines = WrapText(item, kBodyCharsPerLine);
-            wrapped.insert(wrapped.end(), lines.begin(), lines.end());
-        }
-        if (wrapped.empty()) {
-            wrapped.push_back("暂无日志");
-        }
+        wrapped.push_back("暂无日志");
 
         const int log_offset = std::clamp(
             log_scroll_offset_,
@@ -607,14 +737,37 @@ void LanMicApp::UpdateDisplay() {
             texts.push_back({line, 12, y, 16});
             y += kLineHeight;
         }
+
+        texts.push_back({GetFooterText(), 12, kFooterTextY, 16});
+        display_->DrawTexts(texts, true);
+        DrawHorizontalLine(kStatusBarBottomY);
+        DrawHorizontalLine(kHeaderLineY);
+        DrawHorizontalLine(kFooterTopY);
+        DrawWifiIcon(10, 8);
+        DrawBatteryIcon(382, 12, battery_known_ ? battery_level_ : 0, battery_charging_);
     } else {
-        // Settings page
+        // Settings page 保持原有布局
+        std::string battery_text = "--";
+        if (battery_known_) {
+            battery_text = std::to_string(std::clamp(battery_level_, 0, 100));
+            if (battery_charging_) {
+                battery_text += "+";
+            }
+        }
+        texts.push_back({GetNetworkLabel(), 28, 9, 16});
+        texts.push_back({"待办", 96, 9, 16});
+        texts.push_back({GetPhaseLabel(), 166, 9, 16});
+        texts.push_back({battery_text, 346, 9, 16});
+
+        const char* page_label = "设置";
+        texts.push_back({single_line(page_label, 18), 12, kContentHeaderY, 16});
+        texts.push_back({page_label, 316, kContentHeaderY, 16});
+
         texts.push_back({"设置", 12, kLogTitleY, 16});
         if (settings_editing_volume_) {
-            texts.push_back({"↑/↓ ±10 BOOT 确认", 180, kLogTitleY, 14});
+            texts.push_back({"\u2191/\u2193 \u00B110 BOOT 确认", 180, kLogTitleY, 14});
         }
 
-        // Menu items
         const std::string vol_label = "音量: " + std::to_string(volume_) + "%";
         const char* items[kSettingsItemCount] = {
             vol_label.c_str(),
@@ -631,21 +784,17 @@ void LanMicApp::UpdateDisplay() {
                 row += " *";
             }
             texts.push_back({row, 12, y, 16});
-            y += kLineHeight * 2;  // extra spacing for readability
+            y += kLineHeight * 2;
         }
+
+        texts.push_back({GetFooterText(), 12, kFooterTextY, 16});
+        display_->DrawTexts(texts, true);
+        DrawHorizontalLine(kStatusBarBottomY);
+        DrawHorizontalLine(kHeaderLineY);
+        DrawHorizontalLine(kFooterTopY);
+        DrawWifiIcon(10, 8);
+        DrawBatteryIcon(382, 12, battery_known_ ? battery_level_ : 0, battery_charging_);
     }
 
-    texts.push_back({GetFooterText(), 12, kFooterTextY, 16});
-
-    display_->DrawTexts(texts, true);
-    DrawHorizontalLine(kStatusBarBottomY);
-    DrawHorizontalLine(kHeaderLineY);
-    if (render_page == Page::Summary) {
-        DrawHorizontalLine(kPromptDividerY);
-    }
-    DrawHorizontalLine(kFooterTopY);
-    DrawWifiIcon(10, 8);
-    DrawBatteryIcon(382, 12, battery_known_ ? battery_level_ : 0, battery_charging_);
     display_->RequestUrgentRefresh();
 }
-

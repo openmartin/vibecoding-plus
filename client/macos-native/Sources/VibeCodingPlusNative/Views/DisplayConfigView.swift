@@ -1,4 +1,5 @@
 import SwiftUI
+
 struct DisplayConfigView: View {
     @EnvironmentObject private var state: AppState
 
@@ -12,12 +13,7 @@ struct DisplayConfigView: View {
                         SliderRow(title: "Todo 刷新间隔", value: Binding(
                             get: { Double(state.displayConfig.todoRefreshMs) },
                             set: { state.displayConfig.todoRefreshMs = Int($0) }
-                        ), range: 200...10000, suffix: "ms", hint: "备忘页自动刷新间隔")
-                        InkDivider()
-                        SliderRow(title: "Coding 刷新间隔", value: Binding(
-                            get: { Double(state.displayConfig.codingRefreshMs) },
-                            set: { state.displayConfig.codingRefreshMs = Int($0) }
-                        ), range: 200...10000, suffix: "ms", hint: "编程页自动刷新间隔")
+                        ), range: 200...10000, suffix: "ms", hint: "待办页自动刷新间隔")
                         Spacer(minLength: 0)
                         InkDivider()
                         HStack(spacing: 8) {

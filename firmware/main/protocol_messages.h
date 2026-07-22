@@ -1,23 +1,13 @@
 #ifndef PROTOCOL_MESSAGES_H
 #define PROTOCOL_MESSAGES_H
 
-#define LAN_PROTOCOL_VERSION 1
+#define LAN_PROTOCOL_VERSION 2
 
 #define LAN_MSG_DEVICE_HELLO "hello"
 #define LAN_MSG_DEVICE_PTT_START "ptt_start"
 #define LAN_MSG_DEVICE_PTT_STOP "ptt_stop"
-#define LAN_MSG_DEVICE_ACTION_SEND "action_send"
-#define LAN_MSG_DEVICE_ACTION_UNDO "action_undo"
-#define LAN_MSG_DEVICE_ACTION_ENTER "action_enter"
-#define LAN_MSG_DEVICE_ACTION_CLEAR_INPUT "action_clear_input"
-#define LAN_MSG_DEVICE_SET_MODE "set_mode"
-#define LAN_MSG_DEVICE_SET_TARGET "set_target"
-#define LAN_MSG_DEVICE_SET_CLI_CWD "set_cli_cwd"
 #define LAN_MSG_DEVICE_TODO_COMMAND "todo_command"
-#define LAN_MSG_DEVICE_PLAN_SELECT "plan_select"
-#define LAN_MSG_DEVICE_PLAN_APPLY "plan_apply"
 #define LAN_MSG_DEVICE_PING "ping"
-#define LAN_MSG_DEVICE_PROMPT "prompt"
 #define LAN_MSG_DEVICE_FIRMWARE_PROGRESS "firmware_progress"
 #define LAN_MSG_DEVICE_FIRMWARE_RESULT "firmware_result"
 #define LAN_MSG_DEVICE_FIRMWARE_CHECK_RESULT "firmware_check_result"
@@ -31,14 +21,8 @@
 #define LAN_MSG_SERVER_TRANSCRIPT_PARTIAL "transcript_partial"
 #define LAN_MSG_SERVER_TRANSCRIPT_CLEARED "transcript_cleared"
 #define LAN_MSG_SERVER_STATUS "status"
-#define LAN_MSG_SERVER_MODE_STATE "mode_state"
 #define LAN_MSG_SERVER_TODO_STATE "todo_state"
 #define LAN_MSG_SERVER_TODO_RESULT "todo_result"
-#define LAN_MSG_SERVER_CLI_SESSION_STATE "cli_session_state"
-#define LAN_MSG_SERVER_CLI_SUMMARY "cli_summary"
-#define LAN_MSG_SERVER_CLI_LOG_TAIL "cli_log_tail"
-#define LAN_MSG_SERVER_CLI_CWD_UPDATED "cli_cwd_updated"
-#define LAN_MSG_SERVER_PLAN_OPTIONS "plan_options"
 #define LAN_MSG_SERVER_FORCE_REFRESH "force_refresh"
 #define LAN_MSG_SERVER_DEVICE_EVENT "device_event"
 #define LAN_MSG_SERVER_PONG "pong"

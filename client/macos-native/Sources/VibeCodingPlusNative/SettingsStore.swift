@@ -15,8 +15,6 @@ struct SettingsStore {
     func loadConfig() -> AppConfig {
         let values = readEnv()
         var config = AppConfig()
-        config.transcriptDeliveryMode = values["TRANSCRIPT_DELIVERY_MODE"] ?? config.transcriptDeliveryMode
-        config.textInjectionMode = values["TEXT_INJECTION_MODE"] ?? config.textInjectionMode
         config.openaiApiKey = values["OPENAI_API_KEY"] ?? ""
         config.openaiModel = values["OPENAI_TRANSCRIBE_MODEL"] ?? config.openaiModel
         config.openaiBaseUrl = values["OPENAI_BASE_URL"] ?? values["OPENAI_API_BASE"] ?? ""
@@ -37,48 +35,26 @@ struct SettingsStore {
         config.deepSeekApiKey = values["DEEPSEEK_API_KEY"] ?? ""
         config.deepSeekModel = values["DEEPSEEK_MODEL"] ?? "deepseek-chat"
         config.deepSeekBaseUrl = values["DEEPSEEK_BASE_URL"] ?? "https://api.deepseek.com"
-        config.codexSkipGitRepoCheck = values["CODEX_SKIP_GIT_REPO_CHECK"] == "1"
-        config.claudeDangerouslySkipPermissions = values["CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS"] == "1"
-        config.claudeMaxTurns = Int(values["CLAUDE_MAX_TURNS"] ?? "") ?? 10
         config.mockTranscript = values["MOCK_TRANSCRIPT"] ?? ""
         config.port = Int(values["PORT"] ?? "") ?? 8765
         config.discoveryHostId = values["LAN_DISCOVERY_HOST_ID"] ?? "VibeServer"
         config.discoveryPort = Int(values["LAN_DISCOVERY_PORT"] ?? "") ?? 8766
-        config.remindersSyncEnabled = values["REMINDERS_SYNC_ENABLED"] == "1" || values["REMINDERS_SYNC_ENABLED"]?.lowercased() == "true"
-        config.remindersListName = values["REMINDERS_LIST"] ?? ""
-        config.remindersPollSec = Int(values["REMINDERS_POLL_SEC"] ?? "") ?? 15
         config.displayTodoRefreshMs = Int(values["DISPLAY_TODO_REFRESH_MS"] ?? "") ?? 2000
-        config.displayCodingRefreshMs = Int(values["DISPLAY_CODING_REFRESH_MS"] ?? "") ?? 2000
         config.displayStyle = values["DISPLAY_STYLE"] ?? "light"
+        config.ticktickToken = values["TICKTICK_TOKEN"] ?? ""
 
         // Auto-detect CLI commands (find full path if not explicitly set)
-        config.claudeCommand = values["CLAUDE_COMMAND"] ?? autoDetect("claude")
-        config.codexCommand = values["CODEX_COMMAND"] ?? autoDetect("codex")
         config.whisperCppCommand = values["WHISPER_CPP_COMMAND"] ?? autoDetect("whisper-cli")
-
-        // Auto-detect working directories (default to home if not set)
-        config.codexCwd = values["CODEX_CWD"] ?? defaultCwd()
-        config.claudeCwd = values["CLAUDE_CWD"] ?? defaultCwd()
 
         // Auto-detect STT provider
         config.sttProvider = STTProvider(rawValue: values["STT_PROVIDER"] ?? "") ?? inferredProvider(values)
-
-        // Auto-detect send target (prefer claude > codex > text_injector)
-        if let explicit = values["SEND_TARGET"], !explicit.isEmpty {
-            config.sendTarget = SendTarget(rawValue: explicit) ?? .textInjector
-        } else {
-            config.sendTarget = autoDetectSendTarget(claude: config.claudeCommand, codex: config.codexCommand)
-        }
 
         return config
     }
 
     func saveConfig(_ config: AppConfig) throws {
         var values = readEnv()
-        values["SEND_TARGET"] = config.sendTarget.rawValue
         values["STT_PROVIDER"] = config.sttProvider.rawValue
-        values["TRANSCRIPT_DELIVERY_MODE"] = config.transcriptDeliveryMode
-        values["TEXT_INJECTION_MODE"] = config.textInjectionMode
         values["OPENAI_API_KEY"] = nilIfEmpty(config.openaiApiKey)
         values["OPENAI_TRANSCRIBE_MODEL"] = nilIfEmpty(config.openaiModel)
         values["OPENAI_BASE_URL"] = nilIfEmpty(config.openaiBaseUrl)
@@ -99,22 +75,12 @@ struct SettingsStore {
         values["DEEPSEEK_API_KEY"] = nilIfEmpty(config.deepSeekApiKey)
         values["DEEPSEEK_MODEL"] = config.deepSeekModel != "deepseek-chat" ? config.deepSeekModel : nil
         values["DEEPSEEK_BASE_URL"] = config.deepSeekBaseUrl != "https://api.deepseek.com" ? config.deepSeekBaseUrl : nil
-        values["CODEX_CWD"] = nilIfEmpty(config.codexCwd)
-        values["CLAUDE_CWD"] = nilIfEmpty(config.claudeCwd)
-        values["CLAUDE_COMMAND"] = nilIfEmpty(config.claudeCommand)
-        values["CODEX_COMMAND"] = nilIfEmpty(config.codexCommand)
-        values["CLAUDE_MAX_TURNS"] = config.claudeMaxTurns != 10 ? String(config.claudeMaxTurns) : nil
         values["MOCK_TRANSCRIPT"] = nilIfEmpty(config.mockTranscript)
-        values["CODEX_SKIP_GIT_REPO_CHECK"] = config.codexSkipGitRepoCheck ? "1" : nil
-        values["CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS"] = config.claudeDangerouslySkipPermissions ? "1" : nil
         values["LAN_DISCOVERY_HOST_ID"] = nilIfEmpty(config.discoveryHostId)
         values["LAN_DISCOVERY_PORT"] = config.discoveryPort != 8766 ? String(config.discoveryPort) : nil
-        values["REMINDERS_SYNC_ENABLED"] = config.remindersSyncEnabled ? "1" : nil
-        values["REMINDERS_LIST"] = nilIfEmpty(config.remindersListName)
-        values["REMINDERS_POLL_SEC"] = config.remindersPollSec != 15 ? String(config.remindersPollSec) : nil
         values["DISPLAY_TODO_REFRESH_MS"] = config.displayTodoRefreshMs != 2000 ? String(config.displayTodoRefreshMs) : nil
-        values["DISPLAY_CODING_REFRESH_MS"] = config.displayCodingRefreshMs != 2000 ? String(config.displayCodingRefreshMs) : nil
         values["DISPLAY_STYLE"] = config.displayStyle != "light" ? config.displayStyle : nil
+        values["TICKTICK_TOKEN"] = nilIfEmpty(config.ticktickToken)
         try writeEnv(values)
     }
 
@@ -171,18 +137,5 @@ struct SettingsStore {
     private func autoDetect(_ command: String) -> String {
         let found = Shell.findExecutable(command)
         return found.isEmpty ? command : found
-    }
-
-    /// Default working directory (home directory).
-    private func defaultCwd() -> String {
-        NSHomeDirectory()
-    }
-
-    /// Auto-detect send target based on available CLI tools.
-    /// Prefers claude_code > codex_exec > text_injector.
-    private func autoDetectSendTarget(claude: String, codex: String) -> SendTarget {
-        if !Shell.findExecutable(claude).isEmpty { return .claudeCode }
-        if !Shell.findExecutable(codex).isEmpty { return .codexExec }
-        return .textInjector
     }
 }

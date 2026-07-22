@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import EventKit
 #if canImport(AVFoundation)
 import AVFoundation
 import AVFAudio
@@ -11,23 +10,14 @@ struct EnvironmentChecker {
         let provider = config.sttProvider
         let commands = [
             "brew": "brew",
-            "remindctl": "remindctl",
-            "claude": "claude",
-            "codex": "codex",
             "whisper_cpp": config.whisperCppCommand.isEmpty ? "whisper-cli" : config.whisperCppCommand
         ]
 
         async let brewVersion = version(command: commands["brew"] ?? "brew", args: ["--version"])
-        async let remindVersion = version(command: commands["remindctl"] ?? "remindctl", args: ["--version"])
-        async let claudeVersion = version(command: commands["claude"] ?? "claude", args: ["--version"])
-        async let codexVersion = version(command: commands["codex"] ?? "codex", args: ["--version"])
         async let whisperVersion = version(command: commands["whisper_cpp"] ?? "whisper-cli", args: ["--help"])
 
         let versions = await [
             "brew": brewVersion,
-            "remindctl": remindVersion,
-            "claude": claudeVersion,
-            "codex": codexVersion,
             "whisper_cpp": whisperVersion
         ]
 
@@ -38,39 +28,9 @@ struct EnvironmentChecker {
                 command: commands["brew"] ?? "brew",
                 required: false,
                 installLabel: "安装 Homebrew",
-                purpose: "安装 remindctl、whisper.cpp 等 macOS 工具",
+                purpose: "安装 whisper.cpp 等 macOS 工具",
                 note: "没有 Homebrew 时会先安装 Homebrew",
                 version: versions["brew"] ?? ""
-            ),
-            tool(
-                id: "remindctl",
-                label: "remindctl",
-                command: commands["remindctl"] ?? "remindctl",
-                required: false,
-                installLabel: "安装 remindctl",
-                purpose: "Apple 提醒事项同步",
-                note: "启用提醒同步时需要",
-                version: versions["remindctl"] ?? ""
-            ),
-            tool(
-                id: "claude",
-                label: "Claude Code CLI",
-                command: commands["claude"] ?? "claude",
-                required: config.sendTarget == .claudeCode,
-                installLabel: "安装 Claude CLI",
-                purpose: "Claude Code 模式",
-                note: config.sendTarget == .claudeCode ? "当前模式需要 Claude CLI" : "仅 Claude Code 模式需要",
-                version: versions["claude"] ?? ""
-            ),
-            tool(
-                id: "codex",
-                label: "Codex CLI",
-                command: commands["codex"] ?? "codex",
-                required: config.sendTarget == .codexExec,
-                installLabel: "安装 Codex CLI",
-                purpose: "Codex 模式",
-                note: config.sendTarget == .codexExec ? "当前模式需要 Codex CLI" : "仅 Codex 模式需要",
-                version: versions["codex"] ?? ""
             ),
             tool(
                 id: "whisper_cpp",
@@ -90,31 +50,17 @@ struct EnvironmentChecker {
             ok: checks.allSatisfy { $0.status != "missing" },
             path: Shell.toolPath(),
             provider: provider.rawValue,
-            sendTarget: config.sendTarget,
             checks: checks
         )
     }
 
     private func macosPermissionsCheck(config: AppConfig) -> EnvironmentCheck {
-        let accessibility = AccessibilitySupport.isTrusted
-        let reminderGranted: Bool = {
-            let status = EKEventStore.authorizationStatus(for: .reminder)
-            return status == .authorized || status == .fullAccess || status == .writeOnly
-        }()
         let micGranted = MicrophonePermission.isGranted
 
-        let needsAccessibility = config.sendTarget == .textInjector
-        let needsReminders = config.remindersSyncEnabled
-        let needsMic = true
-
         var missing: [String] = []
-        if needsAccessibility && !accessibility { missing.append("辅助功能") }
-        if needsReminders && !reminderGranted { missing.append("提醒事项") }
-        if needsMic && !micGranted { missing.append("麦克风") }
+        if !micGranted { missing.append("麦克风") }
 
-        let allRequired = [needsAccessibility ? accessibility : true,
-                           needsReminders ? reminderGranted : true,
-                           micGranted].allSatisfy { $0 }
+        let allRequired = micGranted
         let anyMissing = !missing.isEmpty
 
         var status = "optional"
@@ -124,18 +70,13 @@ struct EnvironmentChecker {
             status = "missing"
         }
 
-        let parts: [String] = [
-            "辅助功能: \(accessibility ? "已授权" : (needsAccessibility ? "未授权" : "不需要"))",
-            "麦克风: \(MicrophonePermission.statusText)",
-            "提醒事项: \(reminderGranted ? "已授权" : (needsReminders ? "未授权" : "不需要"))"
-        ]
-        let version = parts.joined(separator: " · ")
+        let version = "麦克风: \(MicrophonePermission.statusText)"
 
         let note: String
         if anyMissing {
-            note = "缺少: \(missing.joined(separator: "、")) — 点「在 Finder 中显示」→ 系统设置辅助功能删除旧条目 → 用 + 重新添加当前应用"
+            note = "缺少: \(missing.joined(separator: "、"))"
         } else {
-            note = "已授权所需权限；重新编译后若输入失效，请重新添加辅助功能授权"
+            note = "已授权所需权限"
         }
 
         return EnvironmentCheck(
@@ -143,13 +84,13 @@ struct EnvironmentChecker {
             label: "macOS 权限",
             type: "permission",
             status: status,
-            required: needsAccessibility || needsReminders,
+            required: true,
             installable: false,
             installLabel: "",
             command: "",
             path: "",
             version: version,
-            purpose: "输入注入、麦克风、提醒事项访问",
+            purpose: "麦克风访问",
             note: note
         )
     }
@@ -177,57 +118,15 @@ struct EnvironmentChecker {
             if [ -x /usr/local/bin/brew ]; then eval "$(/usr/local/bin/brew shellenv)"; fi
             brew --version
             """
-        case "remindctl":
-            return "set -e\n\(brewInstall)\nbrew install remindctl\nremindctl --version"
         case "whisper_cpp":
             return "set -e\n\(brewInstall)\nbrew install whisper-cpp\nwhisper-cli --help >/dev/null || true\necho \"whisper.cpp installed\""
-        case "claude":
-            return """
-            set -e
-            curl -fsSL https://claude.ai/install.sh | bash
-            export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-            claude --version
-            """
-        case "codex":
-            return """
-            set -e
-            curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh
-            export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-            codex --version
-            """
         default:
             return ""
         }
     }
 
     func openPermissions() {
-        AccessibilitySupport.openAccessibilitySettings()
-        AccessibilitySupport.revealRunningAppInFinder()
-    }
-
-    func openToolLogin(_ toolId: String) throws {
-        let command: String
-        switch toolId {
-        case "codex": command = "codex"
-        case "claude": command = "claude"
-        case "remindctl": command = "remindctl status"
-        case "whisper_cpp": command = "whisper-cli --help"
-        default: return
-        }
-
-        let scriptURL = FileManager.default.temporaryDirectory.appendingPathComponent("vibecoding-\(toolId)-\(Int(Date().timeIntervalSince1970)).command")
-        let content = """
-        #!/bin/zsh
-        export PATH="\(Shell.toolPath().replacingOccurrences(of: "\"", with: "\\\""))"
-        cd "$HOME"
-        \(command)
-        echo
-        echo '完成后可关闭此窗口。'
-        read -k 1 '?按任意键关闭...'
-        """
-        try content.write(to: scriptURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
-        NSWorkspace.shared.open(scriptURL)
+        MicrophonePermission.openSettings()
     }
 
     private func tool(id: String, label: String, command: String, required: Bool, installLabel: String, purpose: String, note: String, version: String) -> EnvironmentCheck {

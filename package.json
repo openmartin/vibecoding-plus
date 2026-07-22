@@ -2,7 +2,7 @@
   "name": "@maydayv/vibecoding-plus",
   "version": "0.2.11",
   "private": false,
-  "description": "Voice-driven AI coding bridge and macOS desktop app for ESP32 e-paper devices with Inject, Codex, and Claude modes.",
+  "description": "Voice-driven TODO assistant and macOS desktop app for ESP32 e-paper devices.",
   "type": "module",
   "files": [
     "client",
@@ -36,7 +36,7 @@
   "keywords": [
     "esp32",
     "voice",
-    "codex",
+    "todo",
     "websocket",
     "stt"
   ]

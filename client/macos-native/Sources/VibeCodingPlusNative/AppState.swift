@@ -14,9 +14,7 @@ final class AppState: ObservableObject {
     @Published var todos: [TodoItem] = []
     @Published var archivedTodos: [TodoItem] = []
     @Published var serviceStatus: ServiceStatusPayload?
-    @Published var syncStatus: ReminderSyncStatus?
     @Published var displayConfig = DisplayConfig()
-    @Published var reminderLists: [ReminderListInfo] = []
     @Published var liveActivity = LiveActivity()
     @Published var installLog = ""
     @Published var inlineStatus = ""
@@ -38,10 +36,7 @@ final class AppState: ObservableObject {
 
     private func makeServerConfig() -> ServerConfig {
         var sc = ServerConfig.load()
-        sc.sendTarget = config.sendTarget.rawValue
         sc.sttProvider = config.sttProvider.rawValue
-        sc.transcriptDeliveryMode = config.transcriptDeliveryMode
-        sc.textInjectionMode = config.textInjectionMode
         sc.port = config.port
         sc.discoveryHostId = config.discoveryHostId
         sc.discoveryPort = config.discoveryPort
@@ -65,20 +60,10 @@ final class AppState: ObservableObject {
         sc.qwenAsrSampleRate = Int(config.qwenAsrSampleRate) ?? 16000
         sc.qwenAsrRealtimeBaseUrl = config.qwenAsrRealtimeBaseUrl
         sc.qwenAsrPrompt = config.qwenAsrPrompt
-        sc.claudeCommand = config.claudeCommand
-        sc.claudeCwd = config.claudeCwd
-        sc.claudeMaxTurns = config.claudeMaxTurns
-        sc.claudeDangerouslySkipPermissions = config.claudeDangerouslySkipPermissions
-        sc.codexCommand = config.codexCommand
-        sc.codexCwd = config.codexCwd
-        sc.codexSkipGitRepoCheck = config.codexSkipGitRepoCheck
         sc.mockTranscript = config.mockTranscript
-        sc.remindersSyncEnabled = config.remindersSyncEnabled
-        sc.remindersListName = config.remindersListName
-        sc.remindersPollSec = config.remindersPollSec
         sc.displayTodoRefreshMs = config.displayTodoRefreshMs
-        sc.displayCodingRefreshMs = config.displayCodingRefreshMs
         sc.displayStyle = config.displayStyle
+        sc.ticktickToken = config.ticktickToken
         return sc
     }
 
@@ -109,22 +94,6 @@ final class AppState: ObservableObject {
             }
             server.onTranscript = { [weak self] text in
                 Task { @MainActor in self?.liveActivity.lastTranscript = text }
-            }
-            server.onCliSummary = { [weak self] userText, assistantText in
-                Task { @MainActor in
-                    self?.liveActivity.lastUserText = userText
-                    self?.liveActivity.lastAssistantText = assistantText
-                }
-            }
-            server.onCliStateChange = { [weak self] json in
-                Task { @MainActor in
-                    if let statusLine = json["statusLine"] as? String {
-                        self?.liveActivity.cliStatus = statusLine
-                    }
-                }
-            }
-            server.onCliLogTail = { [weak self] lines in
-                Task { @MainActor in self?.liveActivity.cliLogLines = lines }
             }
             server.onServiceLog = { [weak self] lines in
                 Task { @MainActor in self?.liveActivity.serviceLogLines = lines }
@@ -239,61 +208,8 @@ final class AppState: ObservableObject {
         }
     }
 
-    func revealAppInFinder() {
-        AccessibilitySupport.revealRunningAppInFinder()
-        inlineStatus = "当前应用：\(AccessibilitySupport.runningAppPath)"
-    }
-
-    func openToolLogin(_ id: String) {
-        do {
-            try checker.openToolLogin(id)
-            inlineStatus = "已打开终端，请完成登录或检查"
-        } catch {
-            inlineStatus = "打开终端失败：\(error.localizedDescription)"
-        }
-    }
-
     func openConfigFolder() {
         NSWorkspace.shared.open(settingsStore.configDirectory)
-    }
-
-    func propagateSendTarget() {
-        guard serviceRunning, let server = nativeServer else { return }
-        let target = config.sendTarget.rawValue
-        Task { await server.updateSendTarget(target) }
-    }
-
-    func propagateRuntimeInput() {
-        guard serviceRunning, let server = nativeServer else { return }
-        let target = config.sendTarget.rawValue
-        let deliveryMode = config.transcriptDeliveryMode
-        let injectionMode = config.textInjectionMode
-        Task { await server.updateRuntimeInput(sendTarget: target, deliveryMode: deliveryMode, injectionMode: injectionMode) }
-    }
-
-    func setDeviceVoiceMode(_ device: DeviceInfo, mode: String) async {
-        guard let server = nativeServer else { return }
-        await server.setDeviceVoiceMode(deviceId: device.deviceId, mode: mode)
-        inlineStatus = mode == "todo" ? "已切换到备忘模式" : "已切换到编程模式"
-        await refreshRuntime()
-    }
-
-    func chooseDirectory(for target: SendTarget) {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url {
-            switch target {
-            case .codexExec:
-                config.codexCwd = url.path
-            case .claudeCode:
-                config.claudeCwd = url.path
-            case .textInjector:
-                break
-            }
-        }
     }
 
     func refreshRuntime() async {
@@ -302,7 +218,6 @@ final class AppState: ObservableObject {
         let devices = await server.getDevices()
         let status = await server.getServiceStatus()
         let todoSnap = await server.getTodoSnapshot()
-        let syncStatusRaw = await server.getSyncStatus()
         let dc = await server.getDisplayConfig()
 
         self.devices = devices.map { dict in
@@ -310,7 +225,6 @@ final class AppState: ObservableObject {
                 connId: dict["connId"] as? String,
                 deviceId: dict["deviceId"] as? String ?? "unknown",
                 boardType: dict["boardType"] as? String,
-                voiceMode: dict["voiceMode"] as? String,
                 remoteAddress: dict["remoteAddress"] as? String,
                 connectedAt: dict["connectedAt"] as? Double,
                 isProvisioned: dict["isProvisioned"] as? Bool ?? false
@@ -320,20 +234,11 @@ final class AppState: ObservableObject {
             ok: status["ok"] as? Bool ?? false,
             clientCount: status["clientCount"] as? Int,
             sttProvider: status["sttProvider"] as? String,
-            sendTarget: status["sendTarget"] as? String,
             discoveryEnabled: status["discoveryEnabled"] as? Bool,
             port: status["port"] as? Int
         )
         applyTodoSnapshot(todoSnap)
         self.displayConfig = dc
-        self.syncStatus = ReminderSyncStatus(
-            enabled: syncStatusRaw["enabled"] as? Bool,
-            lastSyncAt: syncStatusRaw["lastSyncAt"] as? Double,
-            syncCount: syncStatusRaw["syncCount"] as? Int,
-            lastError: syncStatusRaw["lastError"] as? String,
-            list: syncStatusRaw["list"] as? String,
-            pollSec: syncStatusRaw["pollSec"] as? Int
-        )
         self.pairingCode = await server.getPairingCode()
         self.otaProgress = await server.getAllFirmwareOtaProgress()
     }
@@ -406,7 +311,7 @@ final class AppState: ObservableObject {
 
     // MARK: - Todo
 
-    func addTodo(_ title: String, dueAt: String? = nil, reminderList: String? = nil) async {
+    func addTodo(_ title: String, dueAt: String? = nil) async {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             inlineStatus = "请输入待办内容"
@@ -416,7 +321,7 @@ final class AppState: ObservableObject {
             inlineStatus = "请先启动服务"
             return
         }
-        let snapshot = await server.createTodo(title: trimmed, dueAt: dueAt, reminderList: reminderList)
+        let snapshot = await server.createTodo(title: trimmed, dueAt: dueAt)
         applyTodoSnapshot(snapshot)
         inlineStatus = "待办已添加"
     }
@@ -447,29 +352,6 @@ final class AppState: ObservableObject {
         archivedTodos = snapshot.archiveItems
     }
 
-    // MARK: - Reminder Sync
-
-    func runReminderSync() async {
-        await nativeServer?.runSyncNow()
-        inlineStatus = "提醒同步已执行"
-        await refreshRuntime()
-    }
-
-    func fetchSyncLists() async {
-        guard let server = nativeServer else { return }
-        reminderLists = await server.getReminderLists()
-    }
-
-    func saveSyncConfig(enabled: Bool, list: String, pollSec: Int) async {
-        config.remindersSyncEnabled = enabled
-        config.remindersListName = list
-        config.remindersPollSec = pollSec
-        try? settingsStore.saveConfig(config)
-        await nativeServer?.updateReminderSyncConfig(enabled: enabled, list: list, pollSec: pollSec)
-        inlineStatus = enabled ? "同步配置已保存并启用" : "同步配置已保存并停用"
-        await refreshRuntime()
-    }
-
     // MARK: - Display Config
 
     func fetchDisplayConfig() async {
@@ -480,7 +362,6 @@ final class AppState: ObservableObject {
     func saveDisplayConfig() async {
         await nativeServer?.updateDisplayConfig(displayConfig)
         config.displayTodoRefreshMs = displayConfig.todoRefreshMs
-        config.displayCodingRefreshMs = displayConfig.codingRefreshMs
         config.displayStyle = displayConfig.style
         try? settingsStore.saveConfig(config)
         inlineStatus = "显示配置已保存并推送到设备"
@@ -490,6 +371,19 @@ final class AppState: ObservableObject {
     func forceDisplayRefresh() async {
         await nativeServer?.forceDisplayRefresh()
         inlineStatus = "已请求设备立即刷新屏幕"
+    }
+
+    // MARK: - TickTick Sync
+
+    func triggerTickTickSync() async {
+        guard let server = nativeServer else {
+            inlineStatus = "请先启动服务"
+            return
+        }
+        inlineStatus = "TickTick 同步中..."
+        await server.triggerTickTickSync()
+        await refreshRuntime()
+        inlineStatus = "TickTick 同步完成"
     }
 
     // MARK: - Server Restart
