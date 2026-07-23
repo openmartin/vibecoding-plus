@@ -50,6 +50,7 @@ public:
 
     void WriteRaw1bpp(int x, int y, int w, int h, const uint8_t* data, size_t len) override;
     void DrawTexts(const std::vector<TextItem>& texts, bool clear) override;
+    void DrawIconFont(const char* text, int x, int y) override;
 
     void EPD_Init();
     void EPD_Clear();

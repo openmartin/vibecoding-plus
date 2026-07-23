@@ -47,6 +47,9 @@ public:
     // data 中 bit=1 表示黑色像素，bit=0 表示白色像素
     virtual void WriteRaw1bpp(int x, int y, int w, int h, const uint8_t* data, size_t len) { (void)x; (void)y; (void)w; (void)h; (void)data; (void)len; }
 
+    // 使用内置图标字体渲染图标文字到帧缓冲区（由子类实现）
+    virtual void DrawIconFont(const char* text, int x, int y) { (void)text; (void)x; (void)y; }
+
     // 文本渲染项
     struct TextItem {
         std::string content;

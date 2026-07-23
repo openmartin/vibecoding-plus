@@ -83,11 +83,6 @@ extern const size_t kCachedTodoStateMaxBytes;
 extern const int64_t kTodoNvsDebounceMs;
 extern const int kProtocolVersion;
 
-extern const uint8_t kWifiIcon12x12[];
-extern const size_t kWifiIcon12x12Size;
-extern const uint8_t kBatteryIcon14x8[];
-extern const size_t kBatteryIcon14x8Size;
-
 std::string FormatTwoDigits(int value);
 std::string FormatTodoClockText(const tm& local_tm);
 std::string FormatTodoDateText(const tm& local_tm);

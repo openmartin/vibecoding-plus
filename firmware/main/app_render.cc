@@ -29,6 +29,7 @@
 #include "board.h"
 #include "boards/zectrix-s3-epaper-4.2/config.h"
 #include "boards/zectrix-s3-epaper-4.2/rtc_pcf8563.h"
+#include <font_zectrix.h>
 
 #include "boards/zectrix/zectrix_nfc.h"
 extern "C" void ZectrixSetFactoryLedOverride(bool enabled, bool blink);
@@ -211,7 +212,7 @@ void LanMicApp::DrawStatusBar(std::vector<Display::TextItem>& texts, const tm* t
     constexpr int kTextY = 4;
 
     // 左侧：网络状态文字（WiFi 图标在 DrawTexts 之后绘制）
-    texts.push_back({GetNetworkLabel(), 24, kTextY, 16});
+    texts.push_back({GetNetworkLabel(), 28, kTextY, 16});
 
     // 中间：时间 + 日期 + 星期（居中）
     std::string center;
@@ -234,17 +235,17 @@ void LanMicApp::DrawStatusBar(std::vector<Display::TextItem>& texts, const tm* t
     }
     texts.push_back({center, (400 - text_width) / 2, kTextY, 16});
 
-    // 右侧：电池百分比（充电时仅显示 +，不显示不可信百分比）
+    // 右侧：电池电量数字（充电时仅显示 +，不显示不可信百分比）
     std::string battery_text = "--";
     if (battery_known_) {
         if (battery_charging_) {
             battery_text = "+";
         } else {
-            battery_text = std::to_string(std::clamp(battery_level_, 0, 100)) + "%";
+            battery_text = std::to_string(std::clamp(battery_level_, 0, 100));
         }
     }
     int bat_w = static_cast<int>(battery_text.size()) * 8;
-    texts.push_back({battery_text, 368 - bat_w, kTextY, 16});
+    texts.push_back({battery_text, 362 - bat_w, kTextY, 16});
 
     // StatusBar 底部分隔线（1px）
     DrawHorizontalLine(kBarBottomY, 1);
@@ -323,39 +324,44 @@ void LanMicApp::DrawWifiIcon(int x, int y) {
     if (display_ == nullptr) {
         return;
     }
-    display_->WriteRaw1bpp(x, y, 12, 12, kWifiIcon12x12, kWifiIcon12x12Size);
+    const char* icon;
+    if (!IsWifiConnected()) {
+        icon = FONT_ZECTRIX_WIFI_SLASH;
+    } else {
+        int rssi = WifiManager::GetInstance().GetRssi();
+        if (rssi >= -50) {
+            icon = FONT_ZECTRIX_WIFI_FULL;
+        } else if (rssi >= -70) {
+            icon = FONT_ZECTRIX_WIFI_FAIR;
+        } else {
+            icon = FONT_ZECTRIX_WIFI_WEAK;
+        }
+    }
+    display_->DrawIconFont(icon, x, y);
 }
 
 void LanMicApp::DrawBatteryIcon(int x, int y, int level, bool charging) {
     if (display_ == nullptr) {
         return;
     }
-
-    const int clamped_level = std::clamp(level, 0, 100);
-    std::vector<uint8_t> buffer(kBatteryIcon14x8, kBatteryIcon14x8 + kBatteryIcon14x8Size);
-    int fill_columns = (clamped_level + 5) / 10;
-    if (clamped_level > 0 && fill_columns == 0) {
-        fill_columns = 1;
-    }
-    fill_columns = std::clamp(fill_columns, 0, 10);
-
-    for (int row = 1; row <= 6; ++row) {
-        for (int col = 1; col <= fill_columns; ++col) {
-            const int bit_index = row * 16 + col;
-            buffer[bit_index >> 3] |= static_cast<uint8_t>(1U << (7 - (bit_index & 7)));
-        }
-    }
+    const char* icon;
     if (charging) {
-        for (int row = 2; row <= 5; ++row) {
-            const int bit_index = row * 16 + 5;
-            buffer[bit_index >> 3] |= static_cast<uint8_t>(1U << (7 - (bit_index & 7)));
-        }
-        for (int col = 4; col <= 6; ++col) {
-            const int bit_index = 4 * 16 + col;
-            buffer[bit_index >> 3] |= static_cast<uint8_t>(1U << (7 - (bit_index & 7)));
+        icon = FONT_ZECTRIX_BATTERY_CHARGING;
+    } else {
+        const int clamped = std::clamp(level, 0, 100);
+        if (clamped >= 88) {
+            icon = FONT_ZECTRIX_BATTERY_FULL;
+        } else if (clamped >= 63) {
+            icon = FONT_ZECTRIX_BATTERY_75;
+        } else if (clamped >= 38) {
+            icon = FONT_ZECTRIX_BATTERY_50;
+        } else if (clamped >= 13) {
+            icon = FONT_ZECTRIX_BATTERY_25;
+        } else {
+            icon = FONT_ZECTRIX_BATTERY_EMPTY;
         }
     }
-    display_->WriteRaw1bpp(x, y, 14, 8, buffer.data(), buffer.size());
+    display_->DrawIconFont(icon, x, y);
 }
 
 // =======================================================
@@ -637,8 +643,8 @@ void LanMicApp::UpdateDisplay() {
             display_->DrawTexts(texts, true);
             DrawHorizontalLine(52, 1);
             DrawHorizontalLine(kFooterTopY);
-            DrawWifiIcon(8, 6);
-            DrawBatteryIcon(372, 8, battery_known_ ? battery_level_ : 0, battery_charging_);
+            DrawWifiIcon(8, 4);
+            DrawBatteryIcon(376, 4, battery_known_ ? battery_level_ : 0, battery_charging_);
         } else {
             // ===== 统一 StatusBar + 6行待办列表布局 =====
             constexpr int kTodoRowStartY = 28;
@@ -701,8 +707,8 @@ void LanMicApp::UpdateDisplay() {
 
             // 绘制位图元素（在 DrawTexts 之后，避免被清空）
             DrawHorizontalLine(24, 1);  // StatusBar 底部分割线（DrawTexts 会清缓冲，须在其后重绘）
-            DrawWifiIcon(8, 6);
-            DrawBatteryIcon(372, 8, battery_known_ ? battery_level_ : 0, battery_charging_);
+            DrawWifiIcon(8, 4);
+            DrawBatteryIcon(376, 4, battery_known_ ? battery_level_ : 0, battery_charging_);
 
             // 待办列表：复选框位图 + 行间分隔线 + 已完成删除线
             if (!todo_items_.empty()) {
@@ -776,8 +782,8 @@ void LanMicApp::UpdateDisplay() {
         display_->DrawTexts(texts, true);
         DrawHorizontalLine(52, 1);
         DrawHorizontalLine(kFooterTopY);
-        DrawWifiIcon(8, 6);
-        DrawBatteryIcon(372, 8, battery_known_ ? battery_level_ : 0, battery_charging_);
+        DrawWifiIcon(8, 4);
+        DrawBatteryIcon(376, 4, battery_known_ ? battery_level_ : 0, battery_charging_);
     } else {
         DrawStatusBar(texts, time_ptr);
 
@@ -809,8 +815,8 @@ void LanMicApp::UpdateDisplay() {
         display_->DrawTexts(texts, true);
         DrawHorizontalLine(52, 1);
         DrawHorizontalLine(kFooterTopY);
-        DrawWifiIcon(8, 6);
-        DrawBatteryIcon(372, 8, battery_known_ ? battery_level_ : 0, battery_charging_);
+        DrawWifiIcon(8, 4);
+        DrawBatteryIcon(376, 4, battery_known_ ? battery_level_ : 0, battery_charging_);
     }
 
     display_->RequestUrgentRefresh();

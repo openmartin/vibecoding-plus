@@ -18,6 +18,7 @@
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(SourceHanSansSC_Medium_slim);
 LV_FONT_DECLARE(NotoSansSC_ExtraLight_16);
+LV_FONT_DECLARE(font_zectrix_16_1);
 
 #define TAG "CustomLcdDisplay"
 static constexpr uint32_t kDisplayKickMs = 1000;
@@ -1260,6 +1261,38 @@ void CustomLcdDisplay::WriteRaw1bpp(int x, int y, int w, int h, const uint8_t* d
 
     xSemaphoreGive(dirty_mutex);
     ESP_LOGI(TAG, "WriteRaw1bpp: region x=%d y=%d w=%d h=%d, %u bytes", x, y, w, h, (unsigned)len);
+}
+
+// =======================================================
+// 图标字体渲染：用 font_zectrix_16_1 写入 1bpp 帧缓冲
+// =======================================================
+void CustomLcdDisplay::DrawIconFont(const char* text, int x, int y) {
+    if (!text || !buffer) return;
+
+    xSemaphoreTake(dirty_mutex, portMAX_DELAY);
+
+    render_text_to_buffer(text, x, y, &font_zectrix_16_1, false);
+
+    // 图标字体 16px，估算脏区域
+    int len = 0;
+    const char* p = text;
+    while (*p) { if ((*p & 0xC0) != 0x80) len++; p++; }
+    const int w = len * 16;
+    const int h = 16;
+
+    Rect r = clamp_rect(align_x8({x, y, w, h}), Width, Height);
+    if (rect_area(r) > 0) {
+        dirty = rect_union(dirty, r);
+        pending = true;
+        refresh_in_progress = true;
+        UpdateDisplayBusyLocked();
+        sm_kick(kDisplayKickMs, "display_iconfont");
+        if (refresh_task) {
+            xTaskNotifyGive(refresh_task);
+        }
+    }
+
+    xSemaphoreGive(dirty_mutex);
 }
 
 // =======================================================

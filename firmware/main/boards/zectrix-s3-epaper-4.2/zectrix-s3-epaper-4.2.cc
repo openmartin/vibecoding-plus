@@ -461,7 +461,11 @@ private:
         if (!has_filtered_voltage) {
             filtered_voltage_mv = average_voltage;
             has_filtered_voltage = true;
+        } else if (average_voltage < filtered_voltage_mv) {
+            // 电压下降方向：更重的低通滤波（90/10），抑制 WiFi/CPU 瞬态跌落
+            filtered_voltage_mv = (filtered_voltage_mv * 9 + average_voltage * 1) / 10;
         } else {
+            // 电压上升方向（充电）：正常滤波速度
             filtered_voltage_mv = (filtered_voltage_mv * 7 + average_voltage * 3) / 10;
         }
 
@@ -474,12 +478,12 @@ private:
         if (!has_last_percent) {
             last_percent = computed_percent;
             has_last_percent = true;
-        } else if (computed_percent > last_percent + 2) {
-            last_percent += 2;
-        } else if (computed_percent < last_percent - 2) {
-            last_percent -= 2;
-        } else {
-            last_percent = computed_percent;
+        } else if (computed_percent > last_percent) {
+            // 充电方向：每周期最多 +2%
+            last_percent += std::min(computed_percent - last_percent, 2);
+        } else if (computed_percent < last_percent) {
+            // 放电方向：每周期最多 -1%（15s 一次，即每分钟最多掉 4%）
+            last_percent -= std::min(last_percent - computed_percent, 1);
         }
 
         voltage_mv = static_cast<uint16_t>(filtered_voltage_mv);
