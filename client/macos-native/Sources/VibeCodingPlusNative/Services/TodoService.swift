@@ -147,6 +147,15 @@ actor TodoService {
             item.source = "local"
             item.dirty = true
             archiveItems.insert(item, at: 0)
+            // Adjust selection to stay on the same item (now first in archive)
+            // or clamp to the remaining active items.
+            if !items.isEmpty {
+                selectedIndex = min(resolvedIndex, items.count - 1)
+            } else if !archiveItems.isEmpty {
+                selectedIndex = 0
+            } else {
+                selectedIndex = -1
+            }
             lastActionText = "已完成计划 \(resolvedIndex + 1)"
         } else if let resolvedIndex = tryResolveIndex(id: id, index: index) {
             // Restore from archive — find by id

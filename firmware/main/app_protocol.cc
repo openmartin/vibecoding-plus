@@ -345,6 +345,14 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         cJSON* archive_items = cJSON_GetObjectItemCaseSensitive(root, "archiveItems");
         cJSON* selected_index = cJSON_GetObjectItemCaseSensitive(root, "selectedIndex");
         const char* last_action = GetJsonString(root, "lastActionText");
+
+        // 记住当前选中条目的 ID，用于在新列表中恢复选中位置
+        std::string prev_selected_id;
+        if (todo_selected_index_ >= 0 &&
+            todo_selected_index_ < static_cast<int>(todo_items_.size())) {
+            prev_selected_id = todo_items_[todo_selected_index_].id;
+        }
+
         todo_items_.clear();
         if (cJSON_IsArray(items)) {
             cJSON* item = nullptr;
@@ -381,10 +389,24 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
                 });
             }
         }
-        if (cJSON_IsNumber(selected_index)) {
-            todo_selected_index_ = selected_index->valueint;
-        } else {
-            todo_selected_index_ = todo_items_.empty() ? -1 : 0;
+
+        // 优先按 ID 恢复选中位置（避免服务端 selectedIndex 与设备本地列表不一致）
+        bool selection_restored = false;
+        if (!prev_selected_id.empty()) {
+            for (int i = 0; i < static_cast<int>(todo_items_.size()); ++i) {
+                if (todo_items_[i].id == prev_selected_id) {
+                    todo_selected_index_ = i;
+                    selection_restored = true;
+                    break;
+                }
+            }
+        }
+        if (!selection_restored) {
+            if (cJSON_IsNumber(selected_index)) {
+                todo_selected_index_ = selected_index->valueint;
+            } else {
+                todo_selected_index_ = todo_items_.empty() ? -1 : 0;
+            }
         }
         if (todo_items_.empty()) {
             todo_selected_index_ = -1;

@@ -116,9 +116,9 @@ void LanMicApp::MoveTodoSelection(int direction) {
 
     todo_selected_index_ = next;
     todo_last_action_text_ = "当前计划 " + std::to_string(todo_selected_index_ + 1);
-    if (IsServerConnected()) {
-        SendTodoCommand(direction < 0 ? "select_prev" : "select_next");
-    }
+    // 选中位置由设备本地管理，不再向服务端发送 select_next/select_prev，
+    // 避免服务端广播 todo_state 时回传错误的 selectedIndex 覆盖本地状态。
+    SaveCachedTodoState();
     UpdateDisplay();
 }
 
