@@ -192,8 +192,18 @@ void LanMicApp::PlayBeep(int freq_hz, int duration_ms) {
         }
         pcm[i] = static_cast<int16_t>(s);
     }
+    // Resume I2S if suspended, play, then re-suspend to save power
+    const bool was_suspended = codec_->is_suspended();
+    if (was_suspended) {
+        codec_->Resume();
+    }
     codec_->EnableOutput(true);
     codec_->OutputData(pcm);
+    if (was_suspended) {
+        // Allow DMA to finish transmitting the short beep before stopping I2S
+        vTaskDelay(pdMS_TO_TICKS(duration_ms + 30));
+        codec_->Suspend();
+    }
 }
 
 void LanMicApp::DrawHorizontalLine(int y, int thickness) {

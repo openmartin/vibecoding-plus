@@ -15,10 +15,16 @@ AudioCodec::~AudioCodec() {
 }
 
 void AudioCodec::OutputData(std::vector<int16_t>& data) {
+    if (suspended_) {
+        return;
+    }
     Write(data.data(), data.size());
 }
 
 bool AudioCodec::InputData(std::vector<int16_t>& data) {
+    if (suspended_) {
+        return false;
+    }
     int samples = Read(data.data(), data.size());
     if (samples > 0) {
         return true;
@@ -44,7 +50,36 @@ void AudioCodec::Start() {
 
     EnableInput(true);
     EnableOutput(true);
+    suspended_ = false;
     ESP_LOGI(TAG, "Audio codec started");
+}
+
+void AudioCodec::Suspend() {
+    if (suspended_) {
+        return;
+    }
+    suspended_ = true;
+    if (rx_handle_ != nullptr) {
+        i2s_channel_disable(rx_handle_);
+    }
+    if (tx_handle_ != nullptr) {
+        i2s_channel_disable(tx_handle_);
+    }
+    ESP_LOGI(TAG, "Audio codec suspended (I2S stopped)");
+}
+
+void AudioCodec::Resume() {
+    if (!suspended_) {
+        return;
+    }
+    suspended_ = false;
+    if (tx_handle_ != nullptr) {
+        ESP_ERROR_CHECK(i2s_channel_enable(tx_handle_));
+    }
+    if (rx_handle_ != nullptr) {
+        ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
+    }
+    ESP_LOGI(TAG, "Audio codec resumed (I2S running)");
 }
 
 void AudioCodec::SetOutputVolume(int volume) {

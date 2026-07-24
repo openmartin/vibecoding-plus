@@ -302,9 +302,6 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
         reconnect_stuck_prompt_ = false;
         todo_menu_open_ = false;
         phase_ = Phase::Idle;
-        // 连上服务器：上升双音
-        PlayBeep(600, 80);
-        PlayBeep(900, 100);
     } else if (strcmp(type, LAN_MSG_SERVER_SERVER_READY) == 0) {
         status_text_ = "就绪";
         offline_todo_mode_ = false;
@@ -449,7 +446,6 @@ void LanMicApp::HandleServerMessage(const char* data, size_t len) {
                 phase_ = Phase::Transcribing;
                 status_text_ = "转写中";
                 active_page_ = Page::Todo;
-                PlayBeep(660, 80);   // 停止录音/转录中：短低音
             } else if (strcmp(status, "empty_segment") == 0 || strcmp(status, "transcript_empty") == 0) {
                 phase_ = Phase::Idle;
                 status_text_ = "未检测到语音";

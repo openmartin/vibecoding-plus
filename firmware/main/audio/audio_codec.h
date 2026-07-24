@@ -28,6 +28,12 @@ public:
     virtual bool InputData(std::vector<int16_t>& data);
     virtual void Start();
 
+    /// Suspend I2S channels to save power when audio is not needed.
+    virtual void Suspend();
+    /// Resume I2S channels after Suspend().
+    virtual void Resume();
+    inline bool is_suspended() const { return suspended_; }
+
     inline bool duplex() const { return duplex_; }
     inline bool input_reference() const { return input_reference_; }
     inline int input_sample_rate() const { return input_sample_rate_; }
@@ -47,6 +53,7 @@ protected:
     bool input_reference_ = false;
     bool input_enabled_ = false;
     bool output_enabled_ = false;
+    bool suspended_ = false;
     int input_sample_rate_ = 0;
     int output_sample_rate_ = 0;
     int input_channels_ = 1;

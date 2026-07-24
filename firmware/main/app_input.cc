@@ -830,11 +830,27 @@ void LanMicApp::Run() {
     // been happily connected for hours does not immediately deep-sleep after
     // the very first failed reconnect attempt.
     int64_t disconnected_since_ms = esp_timer_get_time() / 1000;
+    Phase prev_phase_for_power = phase_;
 
     while (true) {
         const int64_t now_ms = esp_timer_get_time() / 1000;
         DrainPendingEvents(now_ms);
         FlushCachedTodoStateIfNeeded(now_ms);
+
+        // Power management on phase transitions:
+        // Suspend audio + lower WiFi power when leaving active voice states.
+        if ((prev_phase_for_power == Phase::Recording ||
+             prev_phase_for_power == Phase::Transcribing) &&
+            phase_ != Phase::Recording &&
+            phase_ != Phase::Transcribing) {
+            if (codec_ != nullptr) {
+                codec_->Suspend();
+            }
+            if (IsServerConnected()) {
+                board_.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+            }
+        }
+        prev_phase_for_power = phase_;
         const bool allow_up_mode_double =
             !todo_menu_open_ &&
             active_page_ == Page::Todo &&
@@ -1195,6 +1211,11 @@ void LanMicApp::Run() {
             (now_ms - boot_pressed_since_ms) >= kTodoBootHoldMs) {
             todo_hold_started = true;
             ESP_LOGI(kLanMicTag, "PTT start (long press)");
+            // Resume audio I2S and boost WiFi for low-latency streaming
+            if (codec_ != nullptr) {
+                codec_->Resume();
+            }
+            board_.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
             SendPttStart();
             phase_ = Phase::Recording;
             status_text_ = "录音中";
@@ -1233,7 +1254,8 @@ void LanMicApp::Run() {
 
             if (IsServerConnected() &&
                 active_page_ == Page::Todo &&
-                (battery_charging_ || !battery_known_)) {
+                (battery_charging_ || !battery_known_) &&
+                codec_ != nullptr && !codec_->is_suspended()) {
                 CapturePrerollFrame();
                 vTaskDelay(pdMS_TO_TICKS(1));
             } else {
@@ -1243,12 +1265,13 @@ void LanMicApp::Run() {
         }
 
         // Only capture preroll when voice input is plausible (connected +
-        // on the todo page). On other pages or when disconnected, skip the
-        // 20 ms codec read so the CPU can idle longer between button polls.
+        // on the todo page + audio running). On other pages or when disconnected,
+        // skip the 20 ms codec read so the CPU can idle longer between button polls.
         const bool voice_ready = IsServerConnected() &&
             !todo_menu_open_ &&
             active_page_ == Page::Todo &&
-            (battery_charging_ || !battery_known_);
+            (battery_charging_ || !battery_known_) &&
+            codec_ != nullptr && !codec_->is_suspended();
         if (voice_ready) {
             CapturePrerollFrame();
             vTaskDelay(pdMS_TO_TICKS(1));

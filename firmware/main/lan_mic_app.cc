@@ -115,6 +115,9 @@ bool LanMicApp::Initialize() {
     codec_->Start();
     codec_->EnableOutput(false);
     codec_->SetOutputVolume(volume_);
+    // Suspend I2S immediately to save power; will be resumed on demand
+    // (recording start or beep playback).
+    codec_->Suspend();
 
     status_text_ = "启动 Wi‑Fi";
     server_uri_.clear();
@@ -256,7 +259,9 @@ void LanMicApp::TouchUserInput(int64_t now_ms) {
 }
 
 void LanMicApp::HandleWsConnected(const std::string& target_uri_text) {
-    board_.SetPowerSaveLevel(PowerSaveLevel::BALANCED);
+    // Use maximum WiFi power saving when connected but idle;
+    // will be boosted to PERFORMANCE during active recording.
+    board_.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
     SaveCachedServerUri(target_uri_text);
     network_state_ = NetworkState::Server;
     status_text_ = "已连接";
