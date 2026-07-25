@@ -68,6 +68,9 @@ const UBaseType_t kConnectTaskPriority = 2;
 // to preserve battery.  BOOT button or a 5-minute timer wakes the board for
 // another retry cycle.  Pressing BOOT while disconnected resets this window.
 const int64_t kNoConnectionSleepMs = 5LL * 60 * 1000;  // 5 minutes
+// Enter deep sleep after this long with no user interaction, even if the
+// server is still connected.  Any button press wakes the board.
+const int64_t kIdleDeepSleepMs = 30LL * 60 * 1000;  // 30 minutes
 const size_t kBodyCharsPerLine = 22;
 const size_t kPromptVisibleLines = 3;
 const size_t kReplyVisibleLines = 4;

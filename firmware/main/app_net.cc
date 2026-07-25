@@ -4,6 +4,7 @@
 
 #include <cJSON.h>
 #include <driver/gpio.h>
+#include <driver/rtc_io.h>
 #include <esp_log.h>
 #include <esp_random.h>
 #include <esp_system.h>
@@ -835,10 +836,45 @@ void LanMicApp::EnterOfflineDeepSleep() {
     esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(BOOT_BUTTON_GPIO), 0);
     esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(kOfflineSleepRetryIntervalUs));
 
-    status_text_ = "省电休眠";
-    hint_text_ = "按 BOOT 或等 15 分钟唤醒";
+    // Enable RTC pull-ups so active-low buttons can trigger wake from deep sleep
+    rtc_gpio_pullup_en(static_cast<gpio_num_t>(BOOT_BUTTON_GPIO));
+    rtc_gpio_pulldown_dis(static_cast<gpio_num_t>(BOOT_BUTTON_GPIO));
+
+    sleeping_ = true;
     UpdateDisplay();
-    vTaskDelay(pdMS_TO_TICKS(500));  // Let display update before sleeping
+    vTaskDelay(pdMS_TO_TICKS(1500));  // Let e-paper full refresh complete
+
+    esp_deep_sleep_start();
+}
+
+void LanMicApp::EnterIdleDeepSleep() {
+    ESP_LOGI(kLanMicTag, "Entering idle deep sleep after %lld minutes of inactivity",
+             static_cast<long long>(kIdleDeepSleepMs / 60000));
+    DisconnectWebSocket();
+
+    // Persist cached todo state
+    const int64_t now_ms = esp_timer_get_time() / 1000;
+    FlushCachedTodoStateIfNeeded(now_ms, true);
+    SavePendingTodoOps();
+
+    // Wake on button press.  NOTE: GPIO39 (UP) is NOT an RTC GPIO on
+    // ESP32-S3, so only BOOT (GPIO0) and DOWN (GPIO18) can wake from
+    // deep sleep via ext1.  A 60-min safety timer prevents permanent sleep.
+    const uint64_t wake_mask =
+        (1ULL << BOOT_BUTTON_GPIO) |
+        (1ULL << TODO_DOWN_BUTTON_GPIO);
+    esp_sleep_enable_ext1_wakeup(wake_mask, ESP_EXT1_WAKEUP_ANY_LOW);
+    esp_sleep_enable_timer_wakeup(6ULL * 60 * 60 * 1000000);  // 6-hour safety
+
+    // Enable RTC pull-ups so active-low buttons can trigger wake from deep sleep
+    rtc_gpio_pullup_en(static_cast<gpio_num_t>(BOOT_BUTTON_GPIO));
+    rtc_gpio_pulldown_dis(static_cast<gpio_num_t>(BOOT_BUTTON_GPIO));
+    rtc_gpio_pullup_en(static_cast<gpio_num_t>(TODO_DOWN_BUTTON_GPIO));
+    rtc_gpio_pulldown_dis(static_cast<gpio_num_t>(TODO_DOWN_BUTTON_GPIO));
+
+    sleeping_ = true;
+    UpdateDisplay();
+    vTaskDelay(pdMS_TO_TICKS(1500));  // Let e-paper full refresh complete
 
     esp_deep_sleep_start();
 }

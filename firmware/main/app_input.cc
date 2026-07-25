@@ -1160,6 +1160,18 @@ void LanMicApp::Run() {
             }
         }
 
+        // Idle deep sleep: no user interaction for kIdleDeepSleepMs (30 min),
+        // even while connected to server.  Saves ~15-20 mA overnight.
+        // Skipped while charging so the device stays available on power.
+        if (!todo_menu_open_ &&
+            phase_ == Phase::Idle &&
+            !battery_charging_ &&
+            !IsFirmwareOtaRunning() &&
+            (now_ms - last_user_input_ms_) >= kIdleDeepSleepMs) {
+            EnterIdleDeepSleep();
+            // Never reaches here — deep sleep does not return
+        }
+
         if (up_click) {
             if (active_page_ == Page::Todo) {
                 MoveTodoSelection(-1);
@@ -1276,7 +1288,7 @@ void LanMicApp::Run() {
             CapturePrerollFrame();
             vTaskDelay(pdMS_TO_TICKS(1));
         } else {
-            vTaskDelay(pdMS_TO_TICKS(50));
+            vTaskDelay(pdMS_TO_TICKS(100));
         }
     }
 }

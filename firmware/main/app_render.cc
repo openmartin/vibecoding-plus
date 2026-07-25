@@ -226,9 +226,13 @@ void LanMicApp::DrawStatusBar(std::vector<Display::TextItem>& texts, const tm* t
 
     // 中间：时间 + 日期 + 星期（居中）
     std::string center;
-    std::string phase = GetPhaseLabel();
-    if (!phase.empty()) {
-        center = phase + " ";
+    if (sleeping_) {
+        center = "Zzz ";
+    } else {
+        std::string phase = GetPhaseLabel();
+        if (!phase.empty()) {
+            center = phase + " ";
+        }
     }
     if (time_tm != nullptr) {
         center += FormatTodoClockText(*time_tm) + " " + FormatTodoDateText(*time_tm);

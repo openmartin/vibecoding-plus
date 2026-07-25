@@ -61,6 +61,7 @@ extern const int64_t kNavShortPressMaxMs;
 extern const uint32_t kConnectTaskStackSize;
 extern const UBaseType_t kConnectTaskPriority;
 extern const int64_t kNoConnectionSleepMs;
+extern const int64_t kIdleDeepSleepMs;
 extern const size_t kBodyCharsPerLine;
 extern const size_t kPromptVisibleLines;
 extern const size_t kReplyVisibleLines;

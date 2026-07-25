@@ -148,6 +148,7 @@ private:
     int battery_level_ = 0;
     bool battery_known_ = false;
     bool battery_charging_ = false;
+    bool sleeping_ = false;  // Set before deep sleep to show Zzz indicator
     bool battery_discharging_ = false;
     int log_scroll_offset_ = 0;
     std::string cached_server_uri_;
@@ -186,6 +187,7 @@ private:
     void DisconnectWebSocket();
     void RecoverWifiForReconnect(const char* reason = "");
     void EnterOfflineDeepSleep();
+    void EnterIdleDeepSleep();
     bool IsPttPressed() const;
     bool IsNavButtonPressed(gpio_num_t gpio_num) const;
     bool SendJson(const char* json);
