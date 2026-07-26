@@ -31,6 +31,8 @@
 #include "boards/zectrix-s3-epaper-4.2/rtc_pcf8563.h"
 #include <font_zectrix.h>
 
+LV_FONT_DECLARE(SourceHanSansSC_Medium_slim);
+
 #include "boards/zectrix/zectrix_nfc.h"
 extern "C" void ZectrixSetFactoryLedOverride(bool enabled, bool blink);
 extern "C" ZectrixNfc* __attribute__((weak)) ZectrixGetNfc();
@@ -667,7 +669,36 @@ void LanMicApp::UpdateDisplay() {
             constexpr int kTodoTitleX = 40;
             constexpr int kTodoTimeRightEdge = 390;
             constexpr int kTodoRowsVisible = 6;
-            constexpr int kTodoTitleMaxChars = 11;
+            constexpr int kTitleTimeGap = 6;  // 标题与时间之间最小间距
+
+            // 基于像素宽度截断标题（使用真实字体 advance）
+            // 注意：lv_font_get_glyph_dsc 返回的 adv_w 已经是像素单位（内部已 >>4）
+            const lv_font_t* title_font = &SourceHanSansSC_Medium_slim;
+            auto truncate_to_px = [title_font](const std::string& text, int max_px) -> std::string {
+                std::string result;
+                int width = 0;
+                const char* p = text.c_str();
+                while (*p) {
+                    const char* start = p;
+                    uint32_t cp;
+                    unsigned char c = static_cast<unsigned char>(*p);
+                    if (c < 0x80)        { cp = c; p += 1; }
+                    else if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; p += 1; cp = (cp << 6) | (*p & 0x3F); p += 1; }
+                    else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; p += 1; cp = (cp << 6) | (*p & 0x3F); p += 1; cp = (cp << 6) | (*p & 0x3F); p += 1; }
+                    else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; p += 1; cp = (cp << 6) | (*p & 0x3F); p += 1; cp = (cp << 6) | (*p & 0x3F); p += 1; cp = (cp << 6) | (*p & 0x3F); p += 1; }
+                    else { p += 1; continue; }
+                    if (cp == '\n') break;
+                    lv_font_glyph_dsc_t gd = {};
+                    int adv = title_font->line_height / 2;  // fallback: 半宽(像素)
+                    if (lv_font_get_glyph_dsc(title_font, &gd, cp, 0) && gd.adv_w > 0) {
+                        adv = gd.adv_w;  // 已是像素值
+                    }
+                    if (width + adv > max_px) break;
+                    width += adv;
+                    result.append(start, p - start);
+                }
+                return result;
+            };
 
             DrawStatusBar(texts, time_ptr);
 
@@ -690,10 +721,7 @@ void LanMicApp::UpdateDisplay() {
                     const int row_y = kTodoRowStartY + (row_slot * kTodoRowHeight);
                     const bool selected = index == todo_selected_index_;
 
-                    std::string title = single_line(item.title, selected ? kTodoTitleMaxChars - 1 : kTodoTitleMaxChars);
-                    texts.push_back({title, kTodoTitleX, row_y + 8, 24, selected});
-
-                    // 右侧时间（人性化格式，右对齐）
+                    // 先计算右侧时间宽度，确定标题可用像素
                     std::string right_text = FormatTodoRightTimeText(item.due_at, time_ptr, item.is_all_day);
                     int time_w = 0;
                     for (size_t ci = 0; ci < right_text.size(); ) {
@@ -707,6 +735,11 @@ void LanMicApp::UpdateDisplay() {
                     if (time_x < kTodoTitleX + 100) {
                         time_x = kTodoTitleX + 100;
                     }
+
+                    // 标题可用宽度 = 时间起始x - 标题起始x - 间距
+                    const int title_max_px = time_x - kTodoTitleX - kTitleTimeGap;
+                    std::string title = truncate_to_px(item.title, title_max_px);
+                    texts.push_back({title, kTodoTitleX, row_y + 8, 24, selected});
                     texts.push_back({right_text, time_x, row_y + 12, 16, selected});
                 }
 
@@ -753,17 +786,36 @@ void LanMicApp::UpdateDisplay() {
 
                     // 已完成条目：绘制删除线（穿过标题文字中部）
                     if (item.completed) {
-                        std::string title = single_line(item.title, selected ? kTodoTitleMaxChars - 1 : kTodoTitleMaxChars);
+                        // 重新计算截断标题（与上方逻辑一致）
+                        std::string rt = FormatTodoRightTimeText(item.due_at, time_ptr, item.is_all_day);
+                        int tw = 0;
+                        for (size_t ci = 0; ci < rt.size(); ) {
+                            unsigned char ch2 = static_cast<unsigned char>(rt[ci]);
+                            if ((ch2 & 0xE0) == 0xC0) { tw += 8; ci += 2; }
+                            else if ((ch2 & 0xF0) == 0xE0) { tw += 16; ci += 3; }
+                            else if ((ch2 & 0xF8) == 0xF0) { tw += 16; ci += 4; }
+                            else { tw += 8; ci += 1; }
+                        }
+                        int tx = kTodoTimeRightEdge - tw;
+                        if (tx < kTodoTitleX + 100) tx = kTodoTitleX + 100;
+                        std::string title = truncate_to_px(item.title, tx - kTodoTitleX - kTitleTimeGap);
+                        // 用真实字体 advance 计算删除线宽度（adv_w 已是像素值）
                         int text_w = 0;
-                        for (size_t ci = 0; ci < title.size(); ) {
-                            unsigned char ch = static_cast<unsigned char>(title[ci]);
-                            if ((ch & 0xE0) == 0xC0) { text_w += 12; ci += 2; }
-                            else if ((ch & 0xF0) == 0xE0) { text_w += 24; ci += 3; }
-                            else if ((ch & 0xF8) == 0xF0) { text_w += 24; ci += 4; }
-                            else { text_w += 12; ci += 1; }
+                        const char* tp = title.c_str();
+                        while (*tp) {
+                            uint32_t cp2;
+                            unsigned char c2 = static_cast<unsigned char>(*tp);
+                            if (c2 < 0x80) { cp2 = c2; tp += 1; }
+                            else if ((c2 & 0xE0) == 0xC0) { cp2 = c2 & 0x1F; tp += 1; cp2 = (cp2 << 6) | (*tp & 0x3F); tp += 1; }
+                            else if ((c2 & 0xF0) == 0xE0) { cp2 = c2 & 0x0F; tp += 1; cp2 = (cp2 << 6) | (*tp & 0x3F); tp += 1; cp2 = (cp2 << 6) | (*tp & 0x3F); tp += 1; }
+                            else { cp2 = c2 & 0x07; tp += 1; cp2 = (cp2 << 6) | (*tp & 0x3F); tp += 1; cp2 = (cp2 << 6) | (*tp & 0x3F); tp += 1; cp2 = (cp2 << 6) | (*tp & 0x3F); tp += 1; }
+                            lv_font_glyph_dsc_t gd2 = {};
+                            if (lv_font_get_glyph_dsc(title_font, &gd2, cp2, 0) && gd2.adv_w > 0)
+                                text_w += gd2.adv_w;  // 已是像素值
+                            else
+                                text_w += 12;
                         }
                         if (text_w > 0) {
-                            // 24px 字体，文字起始 y=row_y+8，删除线在文字垂直中心
                             const int strike_y = row_y + 8 + 10;
                             DrawStrikethrough(kTodoTitleX, strike_y, text_w, selected);
                         }
