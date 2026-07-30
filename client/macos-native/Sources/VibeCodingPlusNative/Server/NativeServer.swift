@@ -131,6 +131,59 @@ actor NativeServer {
         try await start()
     }
 
+    // MARK: - Sleep / Wake Handling
+
+    /// Called when the system is about to sleep.
+    /// Gracefully closes all device connections and suspends keepalive.
+    func handleSleep() async {
+        guard isRunning else { return }
+        appendServiceLog("系统即将睡眠，暂停服务...")
+        stopKeepalive()
+
+        // Close all active connections immediately
+        let conns = await wsServer.allConnections()
+        for conn in conns {
+            conn.close()
+        }
+        clientStates.removeAll()
+        streamingSttSessions.removeAll()
+    }
+
+    /// Called after the system wakes from sleep.
+    /// Restarts the WebSocket listener, discovery server, and keepalive;
+    /// then broadcasts a discovery ping so devices reconnect quickly.
+    func handleWake() async {
+        guard isRunning else { return }
+        appendServiceLog("系统唤醒，恢复服务...")
+
+        // Restart WebSocket listener (it may have entered .failed state)
+        do {
+            try await wsServer.restart(port: UInt16(config.port))
+            wireWebSocketCallbacks()
+            appendServiceLog("WebSocket 监听已恢复 (port \(config.port))")
+        } catch {
+            appendServiceLog("WebSocket 监听恢复失败: \(error.localizedDescription)")
+        }
+
+        // Restart UDP discovery (socket may be stale after network change)
+        await discoveryServer.stop()
+        do {
+            try await discoveryServer.start(config: config)
+            appendServiceLog("发现服务已恢复")
+        } catch {
+            appendServiceLog("发现服务恢复失败: \(error.localizedDescription)")
+        }
+
+        // Restart keepalive
+        startKeepalive()
+
+        // Send a discovery broadcast so devices know we're back
+        await discoveryServer.sendBroadcast(config: config)
+        appendServiceLog("已发送发现广播，等待设备重连")
+
+        onStatusChange?(.running, "服务运行中 (port \(config.port))")
+    }
+
     // MARK: - Direct Function Calls (replaces HTTP admin API)
 
     func getPairingCode() -> String { pairingCode }

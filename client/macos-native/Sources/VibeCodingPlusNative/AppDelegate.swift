@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.setActivationPolicy(.accessory)
         configureWindows()
         createStatusItem()
+        registerSleepWakeObservers()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -178,5 +179,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+
+    // MARK: - Sleep / Wake Observers
+
+    private func registerSleepWakeObservers() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(systemWillSleep(_:)),
+            name: NSWorkspace.willSleepNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(systemDidWake(_:)),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func systemWillSleep(_ notification: Notification) {
+        Task { @MainActor in
+            await appState?.handleSystemSleep()
+        }
+    }
+
+    @objc private func systemDidWake(_ notification: Notification) {
+        Task { @MainActor in
+            await appState?.handleSystemWake()
+            refreshStatusMenu()
+        }
     }
 }

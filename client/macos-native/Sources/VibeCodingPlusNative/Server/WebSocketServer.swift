@@ -332,6 +332,13 @@ actor WebSocketServer {
         for conn in conns { conn.close() }
     }
 
+    /// Restarts the TCP listener after a failure (e.g. system sleep/wake).
+    /// Existing connections are closed first.
+    func restart(port: UInt16) throws {
+        stop()
+        try start(port: port)
+    }
+
     // MARK: Broadcasting
 
     func broadcast(text: String) {

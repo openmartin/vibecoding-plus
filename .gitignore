@@ -11,6 +11,7 @@ npm-debug.log*
 .npm-cache/
 dist-desktop/
 dist-native/
+.build/
 logs/
 .playwright-mcp/
 .codex/

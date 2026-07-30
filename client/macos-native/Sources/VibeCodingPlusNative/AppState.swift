@@ -393,6 +393,30 @@ final class AppState: ObservableObject {
         await restartService()
     }
 
+    // MARK: - System Sleep / Wake
+
+    /// Called by AppDelegate when the system is about to sleep.
+    func handleSystemSleep() async {
+        guard serviceRunning else { return }
+        await nativeServer?.handleSleep()
+        devices = []
+        inlineStatus = "系统睡眠，服务已暂停"
+    }
+
+    /// Called by AppDelegate after the system wakes from sleep.
+    /// Waits briefly for the network stack to stabilize before restarting.
+    func handleSystemWake() async {
+        guard serviceRunning else { return }
+        inlineStatus = "系统唤醒，正在恢复服务..."
+
+        // Give the network stack a moment to re-establish interfaces
+        try? await Task.sleep(for: .seconds(2))
+
+        await nativeServer?.handleWake()
+        await refreshRuntime()
+        inlineStatus = "服务已恢复 (port \(config.port))"
+    }
+
     // MARK: - Login Item (Auto-Launch)
 
     private func syncLoginItem() {

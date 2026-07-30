@@ -82,11 +82,12 @@
 		A2ED719E347C01E32BC0465A /* DevicesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevicesView.swift; sourceTree = "<group>"; };
 		A3466E45BF61D8C7B55A6449 /* ProtocolConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolConstants.swift; sourceTree = "<group>"; };
 		A588CBFAF89D8A59385D8201 /* LanSetupHttpHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanSetupHttpHost.swift; sourceTree = "<group>"; };
+		B8F9EF1430125C25002E9602 /* VibeCodingPlusNative.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = VibeCodingPlusNative.entitlements; sourceTree = "<group>"; };
 		BCD4B647CD735411E7CAC1A5 /* QwenStreamingSTTSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QwenStreamingSTTSession.swift; sourceTree = "<group>"; };
 		C2669562A2E45AC8088F783C /* Shell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shell.swift; sourceTree = "<group>"; };
 		C328FC676278EF5317D488DD /* EnvironmentChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentChecker.swift; sourceTree = "<group>"; };
 		C67DBFCCA43FEBDF464A814C /* InkTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InkTheme.swift; sourceTree = "<group>"; };
-		C9D1E590A38C4C68E7AB5C01 /* VibeCodingPlusNative.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VibeCodingPlusNative.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C9D1E590A38C4C68E7AB5C01 /* VibeCoding Plus.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "VibeCoding Plus.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		CAFC0C09E7F6245A66C6E96F /* VibeCodingPlusNativeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VibeCodingPlusNativeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CEAD40F7C22916D32AE84FA5 /* LANAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LANAuth.swift; sourceTree = "<group>"; };
 		D3AD6DC27912190DD04CA9D6 /* WSFrameParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WSFrameParserTests.swift; sourceTree = "<group>"; };
@@ -179,7 +180,7 @@
 		A86783667281FE2F0E7943BE /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				C9D1E590A38C4C68E7AB5C01 /* VibeCodingPlusNative.app */,
+				C9D1E590A38C4C68E7AB5C01 /* VibeCoding Plus.app */,
 				CAFC0C09E7F6245A66C6E96F /* VibeCodingPlusNativeTests.xctest */,
 			);
 			name = Products;
@@ -198,6 +199,7 @@
 		DF7D28F34CF043C1E2720AE0 = {
 			isa = PBXGroup;
 			children = (
+				B8F9EF1430125C25002E9602 /* VibeCodingPlusNative.entitlements */,
 				95AA289D3BA047FA99F04D4C /* Resources */,
 				82F3974B34E70E4DEE6D8D94 /* Sources */,
 				C469B7D3ACBC911D1C510A67 /* Tests */,
@@ -223,7 +225,7 @@
 			packageProductDependencies = (
 			);
 			productName = VibeCodingPlusNative;
-			productReference = C9D1E590A38C4C68E7AB5C01 /* VibeCodingPlusNative.app */;
+			productReference = C9D1E590A38C4C68E7AB5C01 /* VibeCoding Plus.app */;
 			productType = "com.apple.product-type.application";
 		};
 		C21E8EE2D59AEA9ABF303F7B /* VibeCodingPlusNativeTests */ = {
@@ -253,10 +255,6 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
-					AC04B3A32ED96E65A2ABDAAE = {
-						DevelopmentTeam = "";
-						ProvisioningStyle = Automatic;
-					};
 					C21E8EE2D59AEA9ABF303F7B = {
 						DevelopmentTeam = "";
 					};
@@ -359,11 +357,16 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_STANDALONE_ICON_BEHAVIOR = all;
+				CODE_SIGN_ENTITLEMENTS = VibeCodingPlusNative.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				ENABLE_HARDENED_RUNTIME = NO;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Resources/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -371,6 +374,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.mac20777.vibecodingplus;
 				PRODUCT_MODULE_NAME = VibeCodingPlusNative;
 				PRODUCT_NAME = "VibeCoding Plus";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 			};
 			name = Debug;
@@ -437,11 +441,16 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_STANDALONE_ICON_BEHAVIOR = all;
+				CODE_SIGN_ENTITLEMENTS = VibeCodingPlusNative.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				ENABLE_HARDENED_RUNTIME = NO;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Resources/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -449,6 +458,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.mac20777.vibecodingplus;
 				PRODUCT_MODULE_NAME = VibeCodingPlusNative;
 				PRODUCT_NAME = "VibeCoding Plus";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 			};
 			name = Release;

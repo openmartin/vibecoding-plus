@@ -23,9 +23,8 @@
   "scripts": {
     "desktop:dev": "npm run native:open",
     "desktop:dist:mac": "npm run native:dist:mac",
-    "native:generate": "cd client/macos-native && if command -v xcodegen >/dev/null 2>&1; then xcodegen generate; else echo 'xcodegen not found; using checked-in Xcode project'; fi",
-    "native:build": "npm run native:generate && cd client/macos-native && xcodebuild -project VibeCodingPlusNative.xcodeproj -scheme VibeCodingPlusNative -configuration Debug -destination 'platform=macOS' build",
-    "native:test": "npm run native:generate && cd client/macos-native && xcodebuild -project VibeCodingPlusNative.xcodeproj -scheme VibeCodingPlusNative -configuration Debug -destination 'platform=macOS' test",
+    "native:build": "cd client/macos-native && swift build",
+    "native:test": "cd client/macos-native && swift test",
     "protocol:generate": "node scripts/generate-protocol.mjs",
     "protocol:smoke": "node scripts/mock-client.mjs",
     "firmware:host-test": "bash -c 'ROOT=\"${IDF_PATH:-$HOME/esp/esp-idf}\" && c++ -std=c++20 -I firmware/main -I \"$ROOT/components/json/cJSON\" firmware/main/lan_mic_app_utils.cc \"$ROOT/components/json/cJSON/cJSON.c\" firmware/host-tests/utils_host_test.cc -o /tmp/vcp-firmware-host-test && /tmp/vcp-firmware-host-test'",
