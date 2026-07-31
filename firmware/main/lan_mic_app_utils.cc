@@ -46,14 +46,14 @@ const int kDiscoveryTimeoutMs = 600;
 const int kDiscoveryRetryDelayMs = 150;
 const int64_t kReconnectIntervalMinMs = 2000;
 const int64_t kReconnectIntervalMaxMs = 15000;
-const int64_t kClientPingIntervalMs = 10000;
-const int64_t kPongTimeoutMs = 15000;
+const int64_t kClientPingIntervalMs = 30000;
+const int64_t kPongTimeoutMs = 45000;
 const int64_t kServerSilenceTimeoutMs = 45000;
 const int64_t kConnectAttemptWatchdogMs = 20000;
 const int kReconnectFailuresBeforeWifiRecovery = 3;
 const int64_t kWifiRecoveryCooldownMs = 30000;
 const int64_t kOfflineSleepRetryAwakeMs = 60000;  // 1 minute retry window after timer wake
-const int64_t kOfflineSleepRetryIntervalUs = 15LL * 60 * 1000 * 1000;  // 15 minutes
+const int64_t kOfflineSleepRetryIntervalUs = 30LL * 60 * 1000 * 1000;  // 30 minutes
 const int64_t kReconnectPromptTimeoutMs = 15000;
 const int64_t kTodoBootHoldMs = 1000;
 const int64_t kTodoBootDoubleClickWindowMs = 250;
@@ -70,7 +70,7 @@ const UBaseType_t kConnectTaskPriority = 2;
 const int64_t kNoConnectionSleepMs = 5LL * 60 * 1000;  // 5 minutes
 // Enter deep sleep after this long with no user interaction, even if the
 // server is still connected.  Any button press wakes the board.
-const int64_t kIdleDeepSleepMs = 30LL * 60 * 1000;  // 30 minutes
+const int64_t kIdleDeepSleepMs = 10LL * 60 * 1000;  // 10 minutes
 const size_t kBodyCharsPerLine = 22;
 const size_t kPromptVisibleLines = 3;
 const size_t kReplyVisibleLines = 4;

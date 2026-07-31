@@ -481,9 +481,9 @@ void CustomLcdDisplay::refresh_task_loop() {
     };
 
     while (true) {
-        // Wake every 200ms when idle (no pending refresh) to reduce CPU wakeups
+        // Wake every 500ms when idle (no pending refresh) to reduce CPU wakeups
         // on battery. Urgent notifications still wake the task immediately.
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200));
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(500));
 
         TickType_t now = xTaskGetTickCount();
 

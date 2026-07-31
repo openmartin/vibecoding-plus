@@ -27,6 +27,7 @@
 #include <esp_sleep.h>
 #include <esp_wifi.h>
 #include <esp_netif.h>
+#include <esp_pm.h>
 
 #include "board.h"
 #include "boards/zectrix-s3-epaper-4.2/config.h"
@@ -832,13 +833,21 @@ void LanMicApp::Run() {
     int64_t disconnected_since_ms = esp_timer_get_time() / 1000;
     Phase prev_phase_for_power = phase_;
 
+    // Start with reduced CPU clock since device boots into idle state
+    {
+        esp_pm_config_t pm_cfg = {};
+        pm_cfg.max_freq_mhz = 80;
+        pm_cfg.min_freq_mhz = 40;
+        esp_pm_configure(&pm_cfg);
+    }
+
     while (true) {
         const int64_t now_ms = esp_timer_get_time() / 1000;
         DrainPendingEvents(now_ms);
         FlushCachedTodoStateIfNeeded(now_ms);
 
         // Power management on phase transitions:
-        // Suspend audio + lower WiFi power when leaving active voice states.
+        // Suspend audio + lower WiFi power + reduce CPU freq when leaving active voice states.
         if ((prev_phase_for_power == Phase::Recording ||
              prev_phase_for_power == Phase::Transcribing) &&
             phase_ != Phase::Recording &&
@@ -848,6 +857,13 @@ void LanMicApp::Run() {
             }
             if (IsServerConnected()) {
                 board_.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+            }
+            // Drop CPU to 80 MHz in idle — saves ~5-10 mA on ESP32-S3
+            {
+                esp_pm_config_t pm_cfg = {};
+                pm_cfg.max_freq_mhz = 80;
+                pm_cfg.min_freq_mhz = 40;
+                esp_pm_configure(&pm_cfg);
             }
         }
         prev_phase_for_power = phase_;
@@ -1223,11 +1239,18 @@ void LanMicApp::Run() {
             (now_ms - boot_pressed_since_ms) >= kTodoBootHoldMs) {
             todo_hold_started = true;
             ESP_LOGI(kLanMicTag, "PTT start (long press)");
-            // Resume audio I2S and boost WiFi for low-latency streaming
+            // Resume audio I2S and boost WiFi + CPU for low-latency streaming
             if (codec_ != nullptr) {
                 codec_->Resume();
             }
             board_.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+            // Restore full CPU clock for audio streaming
+            {
+                esp_pm_config_t pm_cfg = {};
+                pm_cfg.max_freq_mhz = 240;
+                pm_cfg.min_freq_mhz = 80;
+                esp_pm_configure(&pm_cfg);
+            }
             SendPttStart();
             phase_ = Phase::Recording;
             status_text_ = "录音中";
@@ -1288,7 +1311,7 @@ void LanMicApp::Run() {
             CapturePrerollFrame();
             vTaskDelay(pdMS_TO_TICKS(1));
         } else {
-            vTaskDelay(pdMS_TO_TICKS(100));
+            vTaskDelay(pdMS_TO_TICKS(250));
         }
     }
 }
