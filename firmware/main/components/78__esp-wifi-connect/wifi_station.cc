@@ -831,7 +831,7 @@ void WifiStation::StartConnect() {
         memcpy(wifi_config.sta.bssid, ap_record.bssid, 6);
         wifi_config.sta.bssid_set = true;
     }
-    wifi_config.sta.listen_interval = 10;
+    wifi_config.sta.listen_interval = 30;
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
 
     reconnect_count_ = 0;
@@ -987,7 +987,7 @@ void WifiStation::WifiEventHandler(void* arg, esp_event_base_t event_base, int32
                     wifi_config.sta.channel = fast_channel;
                     memcpy(wifi_config.sta.bssid, fast_bssid, 6);
                     wifi_config.sta.bssid_set = true;
-                    wifi_config.sta.listen_interval = 10;
+                    wifi_config.sta.listen_interval = 30;
                     ESP_LOGI(FAST_RC_TAG,
                              "stage=wifi event=fast_direct_connect path=fast t_ms=%lld ssid=%s channel=%u",
                              static_cast<long long>(t_ms), it->ssid.c_str(), fast_channel);

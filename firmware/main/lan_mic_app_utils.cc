@@ -68,9 +68,12 @@ const UBaseType_t kConnectTaskPriority = 2;
 // to preserve battery.  BOOT button or a 5-minute timer wakes the board for
 // another retry cycle.  Pressing BOOT while disconnected resets this window.
 const int64_t kNoConnectionSleepMs = 5LL * 60 * 1000;  // 5 minutes
+// Shut down WiFi entirely after this long with no user interaction while
+// connected.  Saves ~5 mA vs MAX_MODEM.  BOOT press restarts WiFi.
+const int64_t kWifiOffIdleMs = 3LL * 60 * 1000;  // 3 minutes
 // Enter deep sleep after this long with no user interaction, even if the
 // server is still connected.  Any button press wakes the board.
-const int64_t kIdleDeepSleepMs = 10LL * 60 * 1000;  // 10 minutes
+const int64_t kIdleDeepSleepMs = 5LL * 60 * 1000;  // 5 minutes
 const size_t kBodyCharsPerLine = 22;
 const size_t kPromptVisibleLines = 3;
 const size_t kReplyVisibleLines = 4;
@@ -88,7 +91,7 @@ const int kLogTitleY = 74;
 const int kLogBodyY = 96;
 const int kFooterTextY = 276;
 const int kLineHeight = 18;
-const int kBatteryPollIntervalMs = 15000;
+const int kBatteryPollIntervalMs = 60000;
 const size_t kCachedTodoStateMaxBytes = 3500;
 const int64_t kTodoNvsDebounceMs = 500;
 const int kProtocolVersion = 1;

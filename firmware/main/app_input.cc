@@ -1034,6 +1034,36 @@ void LanMicApp::Run() {
         }
 
         if (!IsWifiConnected()) {
+            // --- WiFi-off idle mode: WiFi intentionally stopped to save power ---
+            if (wifi_off_idle_) {
+                // Any BOOT press wakes WiFi back up
+                const bool pressed_now = IsPttPressed();
+                if (pressed_now && !last_pressed) {
+                    last_pressed = true;
+                    wifi_off_idle_ = false;
+                    TouchUserInput(now_ms);
+                    WifiManager::GetInstance().StartStation();
+                    disconnected_since_ms = now_ms;
+                    reconnect_interval_ms = kReconnectIntervalMinMs;
+                    last_reconnect_ms = now_ms;
+                    status_text_ = "连接中";
+                    hint_text_ = "正在恢复 WiFi...";
+                    network_state_ = NetworkState::Offline;
+                    UpdateDisplay();
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                    continue;
+                }
+                if (!pressed_now) last_pressed = false;
+                // Enter deep sleep 2 min after WiFi was turned off
+                if (!todo_menu_open_ &&
+                    (now_ms - last_user_input_ms_) >= (kWifiOffIdleMs + 2LL * 60 * 1000)) {
+                    EnterIdleDeepSleep();
+                    // Never reaches here
+                }
+                vTaskDelay(pdMS_TO_TICKS(200));
+                continue;
+            }
+
             if (!offline_todo_mode_ &&
                 !todo_menu_open_ &&
                 phase_ == Phase::Idle &&
@@ -1073,7 +1103,7 @@ void LanMicApp::Run() {
                 EnterOfflineDeepSleep();
                 // Never reaches here — deep sleep does not return
             }
-            vTaskDelay(pdMS_TO_TICKS(50));
+            vTaskDelay(pdMS_TO_TICKS(200));
             continue;
         }
 
@@ -1176,7 +1206,7 @@ void LanMicApp::Run() {
             }
         }
 
-        // Idle deep sleep: no user interaction for kIdleDeepSleepMs (30 min),
+        // Idle deep sleep: no user interaction for kIdleDeepSleepMs (5 min),
         // even while connected to server.  Saves ~15-20 mA overnight.
         // Skipped while charging so the device stays available on power.
         if (!todo_menu_open_ &&
@@ -1186,6 +1216,28 @@ void LanMicApp::Run() {
             (now_ms - last_user_input_ms_) >= kIdleDeepSleepMs) {
             EnterIdleDeepSleep();
             // Never reaches here — deep sleep does not return
+        }
+
+        // WiFi-off idle: shut down WiFi entirely after kWifiOffIdleMs (3 min)
+        // of no interaction while connected.  Saves ~5 mA vs MAX_MODEM standby.
+        // BOOT press restarts WiFi and reconnects (~2 s).
+        if (!todo_menu_open_ &&
+            phase_ == Phase::Idle &&
+            !battery_charging_ &&
+            !IsFirmwareOtaRunning() &&
+            IsServerConnected() &&
+            (now_ms - last_user_input_ms_) >= kWifiOffIdleMs) {
+            ESP_LOGI(kLanMicTag, "Idle %.0f s — shutting down WiFi to save power",
+                     static_cast<double>(kWifiOffIdleMs) / 1000.0);
+            DisconnectWebSocket();
+            WifiManager::GetInstance().StopStation();
+            wifi_off_idle_ = true;
+            status_text_ = "休眠";
+            hint_text_ = "按 BOOT 唤醒";
+            network_state_ = NetworkState::Offline;
+            UpdateDisplay();
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
         }
 
         if (up_click) {

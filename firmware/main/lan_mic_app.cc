@@ -262,6 +262,7 @@ void LanMicApp::HandleWsConnected(const std::string& target_uri_text) {
     // Use maximum WiFi power saving when connected but idle;
     // will be boosted to PERFORMANCE during active recording.
     board_.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+    wifi_off_idle_ = false;  // Clear WiFi-off idle flag on successful connection
     SaveCachedServerUri(target_uri_text);
     network_state_ = NetworkState::Server;
     status_text_ = "已连接";

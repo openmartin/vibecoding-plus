@@ -149,6 +149,7 @@ private:
     bool battery_known_ = false;
     bool battery_charging_ = false;
     bool sleeping_ = false;  // Set before deep sleep to show Zzz indicator
+    bool wifi_off_idle_ = false;  // WiFi intentionally stopped to save power
     bool battery_discharging_ = false;
     int log_scroll_offset_ = 0;
     std::string cached_server_uri_;
