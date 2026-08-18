@@ -33,6 +33,7 @@
 
 #include "boards/zectrix/zectrix_nfc.h"
 extern "C" void ZectrixSetFactoryLedOverride(bool enabled, bool blink);
+extern "C" void ZectrixSetAudioPower(bool on);
 extern "C" ZectrixNfc* __attribute__((weak)) ZectrixGetNfc();
 extern "C" RtcPcf8563* __attribute__((weak)) ZectrixGetRtc();
 #include "display.h"
@@ -107,6 +108,9 @@ bool LanMicApp::Initialize() {
     }
 
     ConfigureButtons();
+    // Restore the ES8311 power rail that was cut before deep sleep; every
+    // wake from deep sleep reboots through here.
+    ZectrixSetAudioPower(true);
     // The e-paper status bar already shows device state; keep the board LED
     // off so power/app LED blinking does not look like an error or recording.
     ZectrixSetFactoryLedOverride(true, false);

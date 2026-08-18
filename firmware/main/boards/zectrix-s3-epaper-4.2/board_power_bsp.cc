@@ -19,16 +19,28 @@ void BoardPowerBsp::PowerLedTask(void *arg) {
             if (blink) {
                 const bool phase = !self->led_override_phase_.load(std::memory_order_relaxed);
                 self->led_override_phase_.store(phase, std::memory_order_relaxed);
-                gpio_hold_dis((gpio_num_t)GPIO_NUM_3);
-                gpio_set_level(GPIO_NUM_3, phase ? 0 : 1);
-                gpio_hold_en((gpio_num_t)GPIO_NUM_3);
+                const int target = phase ? 0 : 1;
+                if (self->led_level_ != target) {
+                    gpio_hold_dis((gpio_num_t)GPIO_NUM_3);
+                    gpio_set_level(GPIO_NUM_3, target);
+                    gpio_hold_en((gpio_num_t)GPIO_NUM_3);
+                    self->led_level_ = target;
+                }
                 vTaskDelay(pdMS_TO_TICKS(500));
                 continue;
             }
-            gpio_hold_dis((gpio_num_t)GPIO_NUM_3);
-            gpio_set_level(GPIO_NUM_3, 1);
-            gpio_hold_en((gpio_num_t)GPIO_NUM_3);
-            vTaskDelay(pdMS_TO_TICKS(500));
+            // Override without blink: keep LED off.  NOTE: this LED is
+            // active-low (GPIO 0 => lit, 1 => off); charge logic below relies
+            // on that too (off when idle, blink while charging, solid on
+            // when full).  Write once; the GPIO hold keeps the level during
+            // sleep, so a slower poll is enough.
+            if (self->led_level_ != 1) {
+                gpio_hold_dis((gpio_num_t)GPIO_NUM_3);
+                gpio_set_level(GPIO_NUM_3, 1);
+                gpio_hold_en((gpio_num_t)GPIO_NUM_3);
+                self->led_level_ = 1;
+            }
+            vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
 
@@ -37,21 +49,31 @@ void BoardPowerBsp::PowerLedTask(void *arg) {
         if (has_status) {
             snap = self->charge_status_->Get();
         }
-        gpio_hold_dis((gpio_num_t)GPIO_NUM_3);
         if (has_status && snap.full) {
-            gpio_set_level(GPIO_NUM_3, 0);
-            gpio_hold_en((gpio_num_t)GPIO_NUM_3);
-            vTaskDelay(pdMS_TO_TICKS(500));
+            if (self->led_level_ != 0) {
+                gpio_hold_dis((gpio_num_t)GPIO_NUM_3);
+                gpio_set_level(GPIO_NUM_3, 0);
+                gpio_hold_en((gpio_num_t)GPIO_NUM_3);
+                self->led_level_ = 0;
+            }
+            vTaskDelay(pdMS_TO_TICKS(1000));
         } else if (has_status && snap.charging) {
+            gpio_hold_dis((gpio_num_t)GPIO_NUM_3);
             gpio_set_level(GPIO_NUM_3, 0);
+            self->led_level_ = 0;
             vTaskDelay(pdMS_TO_TICKS(200));
             gpio_set_level(GPIO_NUM_3, 1);
             gpio_hold_en((gpio_num_t)GPIO_NUM_3);
+            self->led_level_ = 1;
             vTaskDelay(pdMS_TO_TICKS(2800));
         } else {
-            gpio_set_level(GPIO_NUM_3, 1);
-            gpio_hold_en((gpio_num_t)GPIO_NUM_3);
-            vTaskDelay(pdMS_TO_TICKS(500));
+            if (self->led_level_ != 1) {
+                gpio_hold_dis((gpio_num_t)GPIO_NUM_3);
+                gpio_set_level(GPIO_NUM_3, 1);
+                gpio_hold_en((gpio_num_t)GPIO_NUM_3);
+                self->led_level_ = 1;
+            }
+            vTaskDelay(pdMS_TO_TICKS(1000));
         }
     }
 }

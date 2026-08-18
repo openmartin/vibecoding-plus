@@ -35,6 +35,7 @@
 
 #include "boards/zectrix/zectrix_nfc.h"
 extern "C" void ZectrixSetFactoryLedOverride(bool enabled, bool blink);
+extern "C" void ZectrixSetAudioPower(bool on);
 extern "C" ZectrixNfc* __attribute__((weak)) ZectrixGetNfc();
 extern "C" RtcPcf8563* __attribute__((weak)) ZectrixGetRtc();
 #include "display.h"
@@ -75,8 +76,12 @@ void LanMicApp::RefreshBatteryStatus(bool force_update) {
     bool charging = false;
     bool discharging = false;
     const bool ok = board_.GetBatteryLevel(level, charging, discharging);
+    // Repaint the e-paper only when the icon actually changes: a 60s poll with
+    // a 1% repaint threshold could refresh the panel every minute / 1440x a
+    // day, and every refresh drives the full panel at tens of mA.
+    const bool level_changed = std::abs(battery_level_ - level) >= 3;
     const bool changed = (!battery_known_ && ok) ||
-                         battery_level_ != level ||
+                         level_changed ||
                          battery_charging_ != charging ||
                          battery_discharging_ != discharging;
 
@@ -747,6 +752,15 @@ void LanMicApp::SaveVolume() {
 
 void LanMicApp::Shutdown() {
     DisconnectWebSocket();
+    // Cut NFC + audio rail power so the shutdown state draws only the deep
+    // sleep budget while the user leaves the board unattended.
+    if (ZectrixGetNfc != nullptr) {
+        ZectrixNfc* nfc = ZectrixGetNfc();
+        if (nfc != nullptr && nfc->IsPowered()) {
+            nfc->PowerOff();
+        }
+    }
+    ZectrixSetAudioPower(false);
     status_text_ = "关机中...";
     hint_text_ = "按 BOOT 唤醒";
     active_page_ = Page::Todo;

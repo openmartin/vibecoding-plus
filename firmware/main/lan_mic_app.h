@@ -189,6 +189,8 @@ private:
     void RecoverWifiForReconnect(const char* reason = "");
     void EnterOfflineDeepSleep();
     void EnterIdleDeepSleep();
+    // Cut idle peripheral power (NFC chip, ES8311 rail) before deep sleep.
+    void PreparePeripheralsForDeepSleep();
     bool IsPttPressed() const;
     bool IsNavButtonPressed(gpio_num_t gpio_num) const;
     bool SendJson(const char* json);

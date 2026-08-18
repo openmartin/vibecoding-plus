@@ -453,14 +453,19 @@ void CustomLcdDisplay::refresh_task_loop() {
     const TickType_t kUrgentDebounceTicks = pdMS_TO_TICKS(30);
     const float kMinDiffBitRatio = 0.001f;  // 0.1%
     const float kForceFullDiffRatio = 0.12f;  // 12%
-    const int kMaxPartialBeforeFull = 1;
+    // Allow a few consecutive partial updates before a full refresh: every
+    // update drives the full panel anyway, so full refreshes cost the same
+    // battery as partials and only add flash/waveform margin.
+    const int kMaxPartialBeforeFull = 4;
     const int kTinyMaxStreak = 4;
     const size_t kTinyMaxAccumBits = 64 * 8;
     const TickType_t kTinyMaxHoldTicks = pdMS_TO_TICKS(1200);
     const TickType_t kStatPeriodTicks = pdMS_TO_TICKS(3000);
-    // Force a full refresh every 5 minutes to clear e-paper ghosting,
-    // even when the display content has not changed.
-    const TickType_t kPeriodicFullRefreshTicks = pdMS_TO_TICKS(5UL * 60 * 1000);
+    // Force a full refresh every 60 minutes to clear e-paper ghosting, even
+    // when the display content has not changed.  5-minute periodicity costs
+    // ~288 full-panel waveforms/day on battery; wake-ups from deep sleep
+    // already force a full refresh to clear residual image.
+    const TickType_t kPeriodicFullRefreshTicks = pdMS_TO_TICKS(60UL * 60 * 1000);
     TickType_t last_full_refresh_tick = 0;
 
     auto maybe_log_stats = [&](TickType_t now_tick) {
@@ -481,9 +486,9 @@ void CustomLcdDisplay::refresh_task_loop() {
     };
 
     while (true) {
-        // Wake every 500ms when idle (no pending refresh) to reduce CPU wakeups
+        // Wake every 1s when idle (no pending refresh) to reduce CPU wakeups
         // on battery. Urgent notifications still wake the task immediately.
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(500));
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
 
         TickType_t now = xTaskGetTickCount();
 

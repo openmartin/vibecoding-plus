@@ -15,6 +15,9 @@ private:
     std::atomic<bool> led_override_enabled_{false};
     std::atomic<bool> led_override_blink_{false};
     std::atomic<bool> led_override_phase_{false};
+    // Last level written to the board LED; -1 means "never written".
+    // Lets PowerLedTask skip redundant GPIO hold/set cycles in steady state.
+    volatile int led_level_ = -1;
 
     static void PowerLedTask(void *arg);
 

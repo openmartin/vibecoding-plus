@@ -280,6 +280,20 @@ public:
         }
     }
 
+    // Toggle the ES8311 power rail.  Called before deep sleep (off) and on
+    // every boot/wake (on).  The codec draws idle current even when its I2S
+    // channels are disabled, so cut the rail while sleeping.
+    void SetAudioPower(bool on) {
+        if (power_ == nullptr) {
+            return;
+        }
+        if (on) {
+            power_->PowerAudioOn();
+        } else {
+            power_->PowerAudioOff();
+        }
+    }
+
 private:
     static int64_t GetNowMs() {
         return esp_timer_get_time() / 1000;
@@ -331,7 +345,13 @@ private:
         if (!nfc_->Init()) {
             ESP_LOGW(kTag, "NFC init failed");
             nfc_.reset();
+            return;
         }
+        // Validation done; power the chip down immediately.  NFC is only
+        // needed briefly when writing the provisioning URI, and
+        // WriteNfcUriIfNeeded powers it back on demand.  A permanently
+        // powered GT23SC6699 draws mA-level current around the clock.
+        nfc_->PowerOff();
     }
 
     void InitializeChargeStatus() {
@@ -538,6 +558,11 @@ extern "C" bool ZectrixReadBatteryPercentForFactoryTest(int* level) {
 extern "C" void ZectrixSetFactoryLedOverride(bool enabled, bool blink) {
     auto& board = static_cast<CustomBoard&>(Board::GetInstance());
     board.SetFactoryLedOverride(enabled, blink);
+}
+
+extern "C" void ZectrixSetAudioPower(bool on) {
+    auto& board = static_cast<CustomBoard&>(Board::GetInstance());
+    board.SetAudioPower(on);
 }
 
 extern "C" ZectrixNfc* ZectrixGetNfc() {

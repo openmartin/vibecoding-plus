@@ -34,6 +34,7 @@
 
 #include "boards/zectrix/zectrix_nfc.h"
 extern "C" void ZectrixSetFactoryLedOverride(bool enabled, bool blink);
+extern "C" void ZectrixSetAudioPower(bool on);
 extern "C" ZectrixNfc* __attribute__((weak)) ZectrixGetNfc();
 extern "C" RtcPcf8563* __attribute__((weak)) ZectrixGetRtc();
 #include "display.h"
@@ -259,6 +260,9 @@ void LanMicApp::WriteNfcUriIfNeeded(const std::string& uri, const char* reason) 
     }
 
     const esp_err_t ret = nfc->WriteUriNdef(uri);
+    // The chip is only needed for the write itself; cut power afterwards so
+    // the NFC front end does not draw current while idle.
+    nfc->PowerOff();
     if (ret != ESP_OK) {
         ESP_LOGW(kLanMicTag,
                  "NFC write uri failed: reason=%s ret=%s uri=%s",
@@ -820,10 +824,25 @@ void LanMicApp::RecoverWifiForReconnect(const char* reason) {
     UpdateDisplay();
 }
 
+void LanMicApp::PreparePeripheralsForDeepSleep() {
+    // NFC: powered down so the GT23SC6699 front end does not draw current
+    // while the board sleeps (it is re-powered on demand for URI writes).
+    if (ZectrixGetNfc != nullptr) {
+        ZectrixNfc* nfc = ZectrixGetNfc();
+        if (nfc != nullptr && nfc->IsPowered()) {
+            nfc->PowerOff();
+        }
+    }
+    // ES8311 audio rail: cut to save the codec's idle current during sleep.
+    // Restored on every boot/wake in LanMicApp::Initialize.
+    ZectrixSetAudioPower(false);
+}
+
 void LanMicApp::EnterOfflineDeepSleep() {
     ESP_LOGI(kLanMicTag, "Entering offline deep sleep after prolonged disconnection");
     DisconnectWebSocket();
     board_.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+    PreparePeripheralsForDeepSleep();
 
     // Persist any pending offline todo state before sleeping
     if (offline_todo_mode_) {
@@ -851,6 +870,7 @@ void LanMicApp::EnterIdleDeepSleep() {
     ESP_LOGI(kLanMicTag, "Entering idle deep sleep after %lld minutes of inactivity",
              static_cast<long long>(kIdleDeepSleepMs / 60000));
     DisconnectWebSocket();
+    PreparePeripheralsForDeepSleep();
 
     // Persist cached todo state
     const int64_t now_ms = esp_timer_get_time() / 1000;
