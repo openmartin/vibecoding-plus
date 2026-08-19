@@ -156,6 +156,17 @@ private:
     std::string paired_host_id_;
     std::string paired_host_name_;
     std::string nfc_last_uri_;
+    // UDP socket that listens on LAN_DISCOVERY_PORT for the host's wake-up
+    // broadcast, so a host that just came back from sleep can make the board
+    // reconnect immediately instead of waiting for its own retry backoff.
+    int discovery_listen_fd_ = -1;
+    // Set when a discover_host broadcast from the host ("macos-native") is
+    // seen; the main loop consumes it and resets the reconnect backoff.
+    std::atomic<bool> discovery_hint_pending_{false};
+    // Consecutive failed direct connects to the cached server URI.  The cache
+    // is only dropped after several misses so a host that is mid-wakeup does
+    // not erase the only fast path back to the (still valid) server.
+    int cache_connect_fail_count_ = 0;
     bool todo_nvs_dirty_ = false;
     int64_t todo_nvs_dirty_since_ms_ = 0;
     std::string todo_nvs_pending_snapshot_;
@@ -179,6 +190,8 @@ private:
     void StartConnectAttemptAsync();
     void RunConnectAttemptTask();
     bool DiscoverServerUri();
+    void EnsureDiscoveryListener();
+    void PollDiscoveryBroadcast();
     std::string GetExpectedDiscoveryHostId() const;
     std::string GetFallbackServerUri() const;
     std::string GetDiscoveryHintText() const;

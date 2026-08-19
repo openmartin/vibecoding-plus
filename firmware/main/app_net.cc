@@ -478,8 +478,17 @@ bool LanMicApp::EnsureWebSocketConnected() {
             ESP_LOGW(kLanMicTag, "Discovered URI failed, forcing discovery next round");
             server_uri_.clear();
         } else if (std::strcmp(target_source, "cache") == 0) {
-            ESP_LOGW(kLanMicTag, "Cache connect failed; clearing stale cache and forcing discovery");
-            ClearCachedServerUri();
+            ESP_LOGW(kLanMicTag, "Cache connect failed; keeping cache for retry, fail=%d",
+                     cache_connect_fail_count_ + 1);
+            // A host that is mid-wakeup can transiently refuse connections;
+            // only drop the cache after several consecutive misses so the
+            // next wake does not lose the known-good server URI.
+            if (++cache_connect_fail_count_ >= kCacheConnectFailuresBeforeDrop) {
+                ClearCachedServerUri();
+                cache_connect_fail_count_ = 0;
+                ESP_LOGW(kLanMicTag, "Dropping stale cache after %d failed connects",
+                         kCacheConnectFailuresBeforeDrop);
+            }
         }
         status_text_ = "连接失败";
         hint_text_ = target_uri;
@@ -490,6 +499,7 @@ bool LanMicApp::EnsureWebSocketConnected() {
     hello_sent_ = false;
     auth_server_nonce_.clear();
     auth_challenge_received_ = false;
+    cache_connect_fail_count_ = 0;
     return true;
 }
 
@@ -639,6 +649,7 @@ bool LanMicApp::DiscoverServerUri() {
 
                 if (type_ok && service_ok && host_ok && auth_ok && ws_url != nullptr && ws_url[0] != '\0') {
                     server_uri_ = ws_url;
+                    cache_connect_fail_count_ = 0;
                     SaveCachedServerUri(server_uri_);
                     SavePairedHost(host_id != nullptr ? host_id : "",
                                    host_name != nullptr ? host_name : "");
@@ -692,6 +703,104 @@ bool LanMicApp::DiscoverServerUri() {
     }
 
     return false;
+#endif
+}
+
+void LanMicApp::EnsureDiscoveryListener() {
+#if CONFIG_LAN_DISCOVERY_ENABLED
+    if (discovery_listen_fd_ >= 0) {
+        return;
+    }
+
+    const int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (fd < 0) {
+        ESP_LOGW(kLanMicTag, "Discovery listener socket failed: errno=%d", errno);
+        return;
+    }
+
+    int reuse = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
+    // Bind a fixed local port so the host's wake-up broadcast (sent to
+    // LAN_DISCOVERY_PORT) actually reaches this board.  The per-attempt
+    // broadcast socket in DiscoverServerUri uses an ephemeral port, so the
+    // two do not collide.
+    struct sockaddr_in local_addr = {};
+    local_addr.sin_family = AF_INET;
+    local_addr.sin_port = htons(CONFIG_LAN_DISCOVERY_PORT);
+    local_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bind(fd,
+             reinterpret_cast<struct sockaddr*>(&local_addr),
+             sizeof(local_addr)) < 0) {
+        ESP_LOGW(kLanMicTag, "Discovery listener bind :%d failed: errno=%d",
+                 CONFIG_LAN_DISCOVERY_PORT, errno);
+        close(fd);
+        return;
+    }
+
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+    discovery_listen_fd_ = fd;
+    ESP_LOGI(kLanMicTag, "Discovery listener ready on udp://:%d", CONFIG_LAN_DISCOVERY_PORT);
+#endif
+}
+
+void LanMicApp::PollDiscoveryBroadcast() {
+#if CONFIG_LAN_DISCOVERY_ENABLED
+    if (!IsWifiConnected()) {
+        if (discovery_listen_fd_ >= 0) {
+            close(discovery_listen_fd_);
+            discovery_listen_fd_ = -1;
+        }
+        return;
+    }
+
+    EnsureDiscoveryListener();
+    if (discovery_listen_fd_ < 0) {
+        return;
+    }
+
+    char buffer[512];
+    while (true) {
+        const ssize_t received = recvfrom(discovery_listen_fd_,
+                                          buffer,
+                                          sizeof(buffer) - 1,
+                                          0,
+                                          nullptr,
+                                          nullptr);
+        if (received < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                break;  // No more pending broadcasts
+            }
+            // Socket no longer usable; recreate on the next poll.
+            close(discovery_listen_fd_);
+            discovery_listen_fd_ = -1;
+            break;
+        }
+        buffer[received] = '\0';
+
+        // Only the native host posts a wake-up discover_host broadcast
+        // (deviceId "macos-native"); our own outbound discovery probe also
+        // arrives on this socket and must be ignored to avoid self-triggers.
+        cJSON* msg = cJSON_Parse(buffer);
+        if (msg == nullptr) {
+            continue;
+        }
+        const char* type = GetJsonString(msg, "type");
+        const char* service = GetJsonString(msg, "service");
+        const char* device_id = GetJsonString(msg, "deviceId");
+        const bool is_host_wake_hint =
+            type != nullptr && strcmp(type, LAN_MSG_DEVICE_DISCOVER_HOST) == 0 &&
+            service != nullptr && strcmp(service, kDiscoveryService) == 0 &&
+            device_id != nullptr && strcmp(device_id, "macos-native") == 0;
+        cJSON_Delete(msg);
+
+        if (is_host_wake_hint) {
+            ESP_LOGI(kLanMicTag, "Host wake-up broadcast received, reconnecting");
+            discovery_hint_pending_.store(true, std::memory_order_release);
+        }
+    }
 #endif
 }
 
@@ -805,6 +914,7 @@ void LanMicApp::RecoverWifiForReconnect(const char* reason) {
     }
     DisconnectWebSocket();
     server_uri_.clear();
+    cache_connect_fail_count_ = 0;
     last_wifi_recovery_ms_ = esp_timer_get_time() / 1000;
 
     // Reset WiFi: disconnect, clear IP cache, reconnect

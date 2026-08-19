@@ -40,6 +40,7 @@ extern const size_t kPrerollFrameCount;
 extern const int kDiscoveryAttempts;
 extern const int kDiscoveryTimeoutMs;
 extern const int kDiscoveryRetryDelayMs;
+extern const int kCacheConnectFailuresBeforeDrop;
 extern const int64_t kReconnectIntervalMinMs;
 extern const int64_t kReconnectIntervalMaxMs;
 extern const int64_t kClientPingIntervalMs;

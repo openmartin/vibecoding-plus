@@ -177,8 +177,15 @@ actor NativeServer {
         // Restart keepalive
         startKeepalive()
 
-        // Send a discovery broadcast so devices know we're back
-        await discoveryServer.sendBroadcast(config: config)
+        // Send a discovery broadcast so devices know we're back.  Repeat a
+        // few times: the board only listens on the discovery port while its
+        // own retry cycle is live, so a single datagram can easily be missed
+        // (or dropped by a router that is still resettling its multicast
+        // state right after wake).
+        for _ in 0..<3 {
+            await discoveryServer.sendBroadcast(config: config)
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
         appendServiceLog("已发送发现广播，等待设备重连")
 
         onStatusChange?(.running, "服务运行中 (port \(config.port))")

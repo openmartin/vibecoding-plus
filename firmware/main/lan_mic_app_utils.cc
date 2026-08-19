@@ -44,6 +44,10 @@ const size_t kPrerollFrameCount = 45;      // 900 ms @ 20 ms per frame
 const int kDiscoveryAttempts = 3;
 const int kDiscoveryTimeoutMs = 600;
 const int kDiscoveryRetryDelayMs = 150;
+// How many consecutive failed direct connects to the cached URI before the
+// cache is dropped.  A host that is still waking up can refuse connections
+// transiently; dropping immediately leaves the board with no fast path back.
+const int kCacheConnectFailuresBeforeDrop = 3;
 const int64_t kReconnectIntervalMinMs = 2000;
 const int64_t kReconnectIntervalMaxMs = 15000;
 const int64_t kClientPingIntervalMs = 30000;

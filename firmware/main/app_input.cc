@@ -859,6 +859,10 @@ void LanMicApp::Run() {
         const int64_t now_ms = esp_timer_get_time() / 1000;
         DrainPendingEvents(now_ms);
         FlushCachedTodoStateIfNeeded(now_ms);
+        // Wake-up broadcasts from the host arrive on the discovery listener;
+        // process them every loop so a freshly-awakened server can pull the
+        // board out of its reconnect backoff immediately.
+        PollDiscoveryBroadcast();
 
         // Power management on phase transitions:
         // Suspend audio + lower WiFi power + reduce CPU freq when leaving active voice states.
@@ -916,7 +920,14 @@ void LanMicApp::Run() {
                 last_ws_ping_ms = 0;
                 awaiting_pong_since_ms = 0;
                 awaiting_pong_baseline_ms = 0;
-            } else if (server_uri_.empty() && cached_server_uri_.empty() && GetFallbackServerUri().empty()) {
+            } else if (server_uri_.empty() && GetFallbackServerUri().empty() &&
+                       (cached_server_uri_.empty() ||
+                        cache_connect_fail_count_ < kCacheConnectFailuresBeforeDrop - 1)) {
+                // No target at all, or the cached URI only just started
+                // failing: retry fast.  A host that is mid-wakeup refuses
+                // connects transiently, so early misses must not push us into
+                // the long backoff (which is what makes the UI show
+                // "no server" while the LAN server is actually back).
                 reconnect_interval_ms = kReconnectIntervalMinMs;
             } else {
                 reconnect_interval_ms = std::min(reconnect_interval_ms * 2, kReconnectIntervalMaxMs);
@@ -1129,6 +1140,17 @@ void LanMicApp::Run() {
             board_.SetPowerSaveLevel(PowerSaveLevel::BALANCED);
             last_reconnect_ms = now_ms;
             StartConnectAttemptAsync();
+        }
+
+        // A host wake-up broadcast means the server is (back) on the LAN:
+        // consume the hint and let the retry above fire on the next loop.
+        // last_reconnect_ms=0 makes the (now_ms - last_reconnect_ms) check
+        // pass immediately without waiting out the backoff.
+        if (discovery_hint_pending_.exchange(false, std::memory_order_acq_rel)) {
+            if (!IsServerConnected()) {
+                reconnect_interval_ms = kReconnectIntervalMinMs;
+                last_reconnect_ms = 0;
+            }
         }
 
         // Deep sleep for WiFi-connected-but-server-unreachable after prolonged disconnection
